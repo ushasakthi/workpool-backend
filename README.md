@@ -31,6 +31,27 @@
 $ npm install
 ```
 
+Copy `.env.example` to `.env` and fill in real values (Mongo URI, JWT secret, etc.) before
+running the app.
+
+## Seed the admin account
+
+There's no self-service way to become an admin — identity and workplace verification are
+reviewed manually by an admin, so one has to exist before that flow can be tested. Run this
+once against a running MongoDB instance to create the first admin account:
+
+```bash
+$ npm run seed:admin
+```
+
+This inserts a single `admin` user directly into MongoDB with verification already marked
+`verified`. It's safe to re-run — if a user with the target email already exists, it exits
+without making changes. Override the generated credentials with env vars (see `.env.example`):
+
+```bash
+$ ADMIN_EMAIL=admin@workpool.local ADMIN_PASSWORD=ChangeMe123! npm run seed:admin
+```
+
 ## Compile and run the project
 
 ```bash
