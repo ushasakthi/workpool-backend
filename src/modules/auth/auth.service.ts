@@ -1,0 +1,193 @@
+import {
+  ConflictException,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
+import { createHash, randomBytes } from 'crypto';
+import { AppConfig } from '../../config/configuration';
+import { UserRole } from '../../common/constants';
+import { compareValue, hashValue } from '../../common/utils/hash.util';
+import { MailService } from '../mail/mail.service';
+import { UsersService } from '../users/users.service';
+import { UserDocument } from '../users/schemas/user.schema';
+import { RegisterDto } from './dto/register.dto';
+import { LoginDto } from './dto/login.dto';
+
+const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
+const DUPLICATE_KEY_ERROR_CODE = 11000;
+
+export interface AuthTokens {
+  accessToken: string;
+  refreshToken: string;
+}
+
+export interface SanitizedUser {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  role: UserRole;
+}
+
+export type AuthResult = { user: SanitizedUser } & AuthTokens;
+
+@Injectable()
+export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly jwtService: JwtService,
+    private readonly configService: ConfigService<AppConfig, true>,
+    private readonly mailService: MailService,
+  ) {}
+
+  async register(dto: RegisterDto): Promise<AuthResult> {
+    const existing = await this.usersService.findByEmail(dto.email);
+    if (existing) {
+      throw new ConflictException('An account with this email already exists');
+    }
+
+    const passwordHash = await hashValue(dto.password);
+
+    let user: UserDocument;
+    try {
+      user = await this.usersService.create({
+        name: dto.name,
+        email: dto.email,
+        passwordHash,
+        phone: dto.phone,
+        role: dto.role ?? UserRole.PASSENGER,
+      });
+    } catch (err) {
+      if (this.isDuplicateKeyError(err)) {
+        throw new ConflictException(
+          'An account with this email already exists',
+        );
+      }
+      throw err;
+    }
+
+    const tokens = await this.issueTokens(user);
+    return { user: this.sanitize(user), ...tokens };
+  }
+
+  async login(dto: LoginDto): Promise<AuthResult> {
+    const user = await this.usersService.findByEmail(dto.email);
+    const passwordMatches = user
+      ? await compareValue(dto.password, user.passwordHash)
+      : false;
+
+    if (!user || !passwordMatches) {
+      throw new UnauthorizedException('Invalid email or password');
+    }
+
+    const tokens = await this.issueTokens(user);
+    return { user: this.sanitize(user), ...tokens };
+  }
+
+  async refresh(refreshToken: string): Promise<AuthTokens> {
+    const jwtConfig = this.configService.get('jwt', { infer: true });
+
+    let payload: { sub: string };
+    try {
+      payload = await this.jwtService.verifyAsync<{ sub: string }>(
+        refreshToken,
+        { secret: jwtConfig.refreshSecret },
+      );
+    } catch {
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+
+    const user = await this.usersService.findByIdWithRefreshHash(payload.sub);
+    const tokenMatches =
+      user?.refreshTokenHash &&
+      (await compareValue(refreshToken, user.refreshTokenHash));
+
+    if (!user || !tokenMatches) {
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+
+    return this.issueTokens(user);
+  }
+
+  async logout(userId: string): Promise<void> {
+    await this.usersService.setRefreshTokenHash(userId, null);
+  }
+
+  async forgotPassword(email: string): Promise<void> {
+    const user = await this.usersService.findByEmail(email);
+    if (!user) {
+      return;
+    }
+
+    const rawToken = randomBytes(32).toString('hex');
+    const tokenHash = this.hashResetToken(rawToken);
+    await this.usersService.setPasswordResetToken(
+      user.id,
+      tokenHash,
+      new Date(Date.now() + RESET_TOKEN_TTL_MS),
+    );
+
+    await this.mailService.sendPasswordResetEmail(email, rawToken);
+  }
+
+  async resetPassword(token: string, newPassword: string): Promise<void> {
+    const tokenHash = this.hashResetToken(token);
+    const user = await this.usersService.findByPasswordResetToken(tokenHash);
+    if (!user) {
+      throw new UnauthorizedException('Invalid or expired reset token');
+    }
+
+    const passwordHash = await hashValue(newPassword);
+    await this.usersService.resetPassword(user.id, passwordHash);
+  }
+
+  private async issueTokens(user: UserDocument): Promise<AuthTokens> {
+    const jwtConfig = this.configService.get('jwt', { infer: true });
+    const payload = { sub: user.id, email: user.email, role: user.role };
+
+    const [accessToken, refreshToken] = await Promise.all([
+      this.jwtService.signAsync(payload, {
+        secret: jwtConfig.secret,
+        expiresIn: jwtConfig.expiry,
+      }),
+      this.jwtService.signAsync(payload, {
+        secret: jwtConfig.refreshSecret,
+        expiresIn: jwtConfig.refreshExpiry,
+      }),
+    ]);
+
+    await this.usersService.setRefreshTokenHash(
+      user.id,
+      await hashValue(refreshToken),
+    );
+
+    return { accessToken, refreshToken };
+  }
+
+  private hashResetToken(token: string): string {
+    return createHash('sha256').update(token).digest('hex');
+  }
+
+  private sanitize(user: UserDocument): SanitizedUser {
+    return {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+    };
+  }
+
+  private isDuplicateKeyError(err: unknown): boolean {
+    return (
+      typeof err === 'object' &&
+      err !== null &&
+      (err as { code?: number }).code === DUPLICATE_KEY_ERROR_CODE
+    );
+  }
+}
