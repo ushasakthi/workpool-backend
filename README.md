@@ -52,6 +52,50 @@ without making changes. Override the generated credentials with env vars (see `.
 $ ADMIN_EMAIL=admin@workpool.local ADMIN_PASSWORD=ChangeMe123! npm run seed:admin
 ```
 
+## Authentication
+
+`src/modules/auth` implements registration, login, logout, and password reset, backed by
+`src/modules/users`. Design decisions:
+
+- **Refresh tokens: yes.** Access tokens are short-lived (`JWT_EXPIRY`, 15m) so a leaked one
+  expires fast; a longer-lived refresh token (`JWT_REFRESH_EXPIRY`, 7d, signed with the separate
+  `JWT_REFRESH_SECRET`) is exchanged via `POST /auth/refresh` to get a new pair without forcing
+  re-login. Refresh tokens are rotated on every use and their hash is stored on the user
+  document, so `POST /auth/logout` (JWT-protected) can revoke the stored one immediately.
+- **Self-registration is limited to `passenger` / `driver` / `both`.** `admin` cannot be set via
+  `POST /auth/register` — the only admin account comes from `npm run seed:admin`.
+- **Password reset has no email provider wired up yet.** `POST /auth/forgot-password` generates a
+  token and logs it via `Logger` instead of emailing it, so the flow is testable locally
+  (`npm run start:dev` and watch the console). Swap the `this.logger.log(...)` call in
+  `auth.service.ts` for a real mailer when one is added. The response is always the same generic
+  message regardless of whether the email exists, to avoid leaking which addresses are registered.
+
+API docs (Swagger) are served at `/api/docs` when the app is running.
+
+## Identity & workplace verification
+
+`PATCH /users/me/verification` (self, multipart) accepts a NIC document upload + `nicNumber` +
+`linkedinUrl`, and resets both `verification.identityStatus` and `verification.workplaceStatus`
+to `pending`. `GET /admin/verifications?status=pending` and `PATCH /admin/verifications/:userId`
+(admin-only, `@Roles(admin)`) drive the manual review — approving or rejecting sets both statuses
+together (they're reviewed as one unit, sharing a single `reviewedBy`/`reviewedAt`/
+`rejectionReason`), never automated.
+
+- **NIC uploads are local disk storage, gated behind an authenticated route.** Files land in
+  `NIC_UPLOAD_DIR` (default `./storage/nic-documents`, gitignored) under a random UUID filename —
+  never under a static/public path. `GET /users/:userId/nic-document` is the only way to read one
+  back, protected by `SelfOrAdminGuard` (owner or admin only). Restricted to jpg/png/pdf and 5MB
+  via `MulterModule` (`fileFilter` + `limits.fileSize` in `users.module.ts`), rejecting anything
+  else at the API before it ever touches disk. This is fine for local dev/demo; swapping in
+  object storage (e.g. S3) later just means changing the multer storage engine.
+- **`nicNumber` is encrypted at rest**, not hashed — admins need to read it during review, so it's
+  reversible: AES-256-GCM via `common/utils/encryption.util.ts`, keyed by `ENCRYPTION_KEY` (32-byte
+  hex, separate from the JWT secrets). The field is `select: false` on the schema, so it's only
+  ever pulled from the DB where explicitly needed (verification submission and the admin listing).
+- **LinkedIn URLs are validated against the `linkedin.com` domain** (`LINKEDIN_URL_REGEX`) —
+  matches the project rule that workplace verification is a submitted LinkedIn profile, not
+  automated email-domain checking.
+
 ## Compile and run the project
 
 ```bash
