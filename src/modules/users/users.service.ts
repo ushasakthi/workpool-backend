@@ -43,6 +43,11 @@ export interface UserProfile {
   verification: Verification;
 }
 
+export interface AdminStats {
+  activePassengers: number;
+  activeRiders: number;
+}
+
 @Injectable()
 export class UsersService {
   constructor(
@@ -127,6 +132,15 @@ export class UsersService {
       linkedinUrl: user.linkedinUrl,
       verification: user.verification,
     };
+  }
+
+  async getAdminStats(): Promise<AdminStats> {
+    const [activePassengers, activeRiders] = await Promise.all([
+      this.userModel.countDocuments({ role: { $in: [UserRole.PASSENGER, UserRole.BOTH] } }),
+      this.userModel.countDocuments({ role: { $in: [UserRole.DRIVER, UserRole.BOTH] } }),
+    ]);
+
+    return { activePassengers, activeRiders };
   }
 
   async submitVerification(
