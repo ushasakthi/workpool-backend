@@ -66,8 +66,8 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @Post('reset-password')
   async resetPassword(@Body() dto: ResetPasswordDto) {
-    await this.authService.resetPassword(dto.token, dto.newPassword);
-    return { message: 'Password has been reset. Please log in again.' };
+    const { email } = await this.authService.resetPassword(dto.token, dto.newPassword);
+    return { message: 'Password has been reset. Please log in again.', email };
   }
 
   @ApiOperation({ summary: 'Log out and revoke the current refresh token' })

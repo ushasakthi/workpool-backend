@@ -215,16 +215,17 @@ describe('AuthService', () => {
       ).rejects.toThrow(UnauthorizedException);
     });
 
-    it('updates the password for a valid token', async () => {
+    it('updates the password for a valid token and returns the account email', async () => {
       const user = await buildMockUser();
       usersService.findByPasswordResetToken.mockResolvedValue(user);
 
-      await authService.resetPassword('good-token', 'NewStrongPass1');
+      const result = await authService.resetPassword('good-token', 'NewStrongPass1');
 
       expect(usersService.resetPassword).toHaveBeenCalledWith(
         'user-1',
         expect.any(String),
       );
+      expect(result).toEqual({ email: user.email });
     });
   });
 });

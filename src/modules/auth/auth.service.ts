@@ -135,7 +135,7 @@ export class AuthService {
     await this.mailService.sendPasswordResetEmail(email, rawToken);
   }
 
-  async resetPassword(token: string, newPassword: string): Promise<void> {
+  async resetPassword(token: string, newPassword: string): Promise<{ email: string }> {
     const tokenHash = this.hashResetToken(token);
     const user = await this.usersService.findByPasswordResetToken(tokenHash);
     if (!user) {
@@ -144,6 +144,8 @@ export class AuthService {
 
     const passwordHash = await hashValue(newPassword);
     await this.usersService.resetPassword(user.id, passwordHash);
+
+    return { email: user.email };
   }
 
   private async issueTokens(user: UserDocument): Promise<AuthTokens> {
