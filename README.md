@@ -154,6 +154,55 @@ Design decisions:
 - `UserSchema` indexes `travelProfile.daysAvailable` and `travelProfile.workLocation` — the
   fields the Sprint 4 matching queries filter on.
 
+## Vehicles & rides
+
+`src/modules/vehicles` and `src/modules/rides` cover Sprint 3: a driver registers one or more
+vehicles and posts recurring cost-sharing rides.
+
+- `POST /vehicles` — register a vehicle (`make`, `model`, `year`, `plateNumber`,
+  `seatsAvailable`). Requires role `driver` or `both` (`RolesGuard`).
+- `GET /vehicles/me` — the caller's vehicles, newest first.
+- `PATCH /vehicles/:id` — partial update; only the vehicle owner (or an admin) passes
+  `VehicleOwnerGuard`. Also toggles `isActive` (`{"isActive": false}`) — a soft retire that
+  keeps the vehicle and its ride history on file; Sprint 4 ride posting will hide inactive
+  vehicles from the picker.
+- `PATCH /vehicles/:id/photo` — multipart (`photo` field), jpg/png/webp up to 5 MB, stored on
+  local disk (`VEHICLE_PHOTO_DIR`). Owner/admin only.
+- `GET /vehicles/:id/photo` — the photo, JWT-gated (any authenticated user — photos show to
+  passengers during matching), never a static/public path.
+- `POST /rides` — post a ride (`vehicleId`, `origin`/`destination` `{lat,lng,label}`,
+  `departureTime`, `daysOfWeek`, `seatsAvailable`, `costContribution`). Role `driver`/`both`.
+- `GET /rides/me` — the caller's posted rides, newest first.
+- `PATCH /rides/:id` — one route for edit **and** pause/cancel (`{"status":"paused"}` /
+  `{"status":"cancelled"}`). Only the ride's driver (or an admin) passes `RideOwnerGuard`.
+
+Design decisions:
+
+- **`costContribution` is cost-sharing, never a fare.** It's a *suggested* contribution toward
+  shared fuel / running costs — the DTO and schema say so explicitly. WorkPool is a cost-sharing
+  platform, so no "fare", "price", or "commission" wording anywhere near this field.
+- **`departureTime` is an absolute ISO datetime, validated as a real date in the future**
+  (`@IsDate` + `@MinDate`). `daysOfWeek` carries the recurrence; `departureTime` fixes the
+  departure instant, and Sprint 4's Smart Matching Score reads the time-of-day from it.
+- **Ownership is enforced server-side by guards, not by the client hiding a button.**
+  `VehicleOwnerGuard` / `RideOwnerGuard` load the resource, 404 on missing / malformed id, and
+  403 unless the requester owns it or is an admin (`common/utils/ownership.util.ts`).
+- **Creation is role-gated.** A passenger-only account gets 403 from `POST /vehicles` and
+  `POST /rides` — the "driver"/"both" capability split from the build plan.
+- **Vehicle `seatsAvailable` caps a ride's `seatsAvailable`.** `RidesService` loads the vehicle,
+  confirms the driver owns it, and rejects a ride offering more seats than the vehicle has.
+- **`photoUrl` is serialized as the fetch route, never the stored filename** —
+  `/vehicles/:id/photo?v=<updatedAt>` — same convention as the user profile photo.
+- **`Vehicle.origin`/`destination` and `Ride` refs** use `MongooseSchema.Types.ObjectId` (the
+  form `@nestjs/mongoose` casts) so `driverId` / `vehicleId` / `ownerId` persist as real
+  ObjectIds. `Vehicle.ownerId`, `Ride.driverId`, and `Ride.status` are indexed. Sprint 4 adds
+  the `2dsphere` geo index on `Ride.origin`/`destination`.
+
+Shared building blocks that landed with this sprint: `common/schemas/geo-point.schema.ts` +
+`common/dto/geo-point.dto.ts` (promoted from the users module, re-exported there),
+`common/utils/build-update-set.ts` (partial-PATCH `$set` builder, was private to `UsersService`),
+`common/uploads/` (image Multer config + limits, shared with the profile-photo upload).
+
 ## Compile and run the project
 
 ```bash
