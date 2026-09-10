@@ -9,19 +9,13 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
-import { UserRole } from '../../../common/constants';
+import { SELF_ASSIGNABLE_ROLES, UserRole } from '../../../common/constants';
 import {
   PASSWORD_MAX_LENGTH,
   PASSWORD_MIN_LENGTH,
   PASSWORD_REGEX,
   PHONE_REGEX,
 } from '../../../common/utils/validation-patterns';
-
-const SELF_REGISTERABLE_ROLES = [
-  UserRole.PASSENGER,
-  UserRole.DRIVER,
-  UserRole.BOTH,
-];
 
 export class RegisterDto {
   @ApiProperty({ example: 'Nadeesha Perera' })
@@ -51,10 +45,10 @@ export class RegisterDto {
   phone!: string;
 
   @ApiPropertyOptional({
-    enum: SELF_REGISTERABLE_ROLES,
+    enum: SELF_ASSIGNABLE_ROLES,
     default: UserRole.PASSENGER,
   })
   @IsOptional()
-  @IsIn(SELF_REGISTERABLE_ROLES)
+  @IsIn(SELF_ASSIGNABLE_ROLES)
   role?: UserRole;
 }

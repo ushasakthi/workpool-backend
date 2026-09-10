@@ -1,4 +1,9 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHmac,
+  randomBytes,
+} from 'crypto';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;
@@ -29,4 +34,11 @@ export function decrypt(payload: string, key: Buffer): string {
     decipher.update(ciphertext),
     decipher.final(),
   ]).toString('utf8');
+}
+
+// Deterministic keyed hash (HMAC-SHA256, hex). The same input always produces the
+// same digest, so it can back a unique index / equality lookup on a value that's
+// stored encrypted (and therefore non-deterministic). Not reversible.
+export function hmacDigest(value: string, key: Buffer): string {
+  return createHmac('sha256', key).update(value).digest('hex');
 }

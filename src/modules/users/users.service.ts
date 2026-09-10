@@ -1,12 +1,32 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { isValidObjectId, Model } from 'mongoose';
 import { resolve } from 'path';
 import { AppConfig } from '../../config/configuration';
-import { UserRole, VerificationStatus } from '../../common/constants';
-import { decrypt, encrypt } from '../../common/utils/encryption.util';
+import {
+  PreferredRole,
+  UserRole,
+  VerificationStatus,
+  Weekday,
+} from '../../common/constants';
+import { buildUpdateSet } from '../../common/utils/build-update-set';
+import {
+  decrypt,
+  encrypt,
+  hmacDigest,
+} from '../../common/utils/encryption.util';
 import { User, UserDocument, Verification } from './schemas/user.schema';
+import {
+  OwnUserProfile,
+  PublicUserProfile,
+  serializeOwnProfile,
+  serializeUserProfile,
+} from './serializers/user-profile.serializer';
 
 export interface CreateUserInput {
   name: string;
@@ -33,14 +53,26 @@ export interface VerificationSummary {
   verification: Verification;
 }
 
-export interface UserProfile {
-  id: string;
-  name: string;
-  email: string;
-  phone: string;
-  role: UserRole;
-  linkedinUrl?: string;
-  verification: Verification;
+export interface UpdateProfileInput {
+  name?: string;
+  phone?: string;
+  role?: UserRole;
+}
+
+export interface GeoPointInput {
+  lat: number;
+  lng: number;
+  label?: string;
+}
+
+export interface UpdateTravelProfileInput {
+  homeLocation?: GeoPointInput;
+  workLocation?: GeoPointInput;
+  workStartTime?: string;
+  workEndTime?: string;
+  daysAvailable?: Weekday[];
+  preferredRole?: PreferredRole;
+  hideWorkplaceName?: boolean;
 }
 
 export interface AdminStats {
@@ -117,27 +149,81 @@ export class UsersService {
       .exec();
   }
 
-  async findMe(userId: string): Promise<UserProfile> {
+  async findMe(userId: string): Promise<OwnUserProfile> {
     const user = await this.userModel.findById(userId).exec();
     if (!user) {
       throw new NotFoundException('User not found');
     }
 
-    return {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      phone: user.phone,
-      role: user.role,
-      linkedinUrl: user.linkedinUrl,
-      verification: user.verification,
-    };
+    return serializeOwnProfile(user);
+  }
+
+  // Another user's profile — home/work coordinates are fuzzed and account fields
+  // (email/phone) are dropped unless the requester is the owner.
+  async getPublicProfile(
+    userId: string,
+    requesterId: string,
+  ): Promise<OwnUserProfile | PublicUserProfile> {
+    if (!isValidObjectId(userId)) {
+      throw new NotFoundException('User not found');
+    }
+
+    const user = await this.userModel.findById(userId).exec();
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return serializeUserProfile(user, requesterId);
+  }
+
+  async updateProfile(
+    userId: string,
+    input: UpdateProfileInput,
+  ): Promise<OwnUserProfile> {
+    return this.applyUserUpdate(userId, buildUpdateSet(input));
+  }
+
+  async updateTravelProfile(
+    userId: string,
+    input: UpdateTravelProfileInput,
+  ): Promise<OwnUserProfile> {
+    return this.applyUserUpdate(
+      userId,
+      buildUpdateSet(input, 'travelProfile.'),
+    );
+  }
+
+  updateProfilePhoto(
+    userId: string,
+    photoFilename: string,
+  ): Promise<OwnUserProfile> {
+    return this.applyUserUpdate(userId, { photoUrl: photoFilename });
+  }
+
+  async resolveProfilePhotoPath(userId: string): Promise<string> {
+    if (!isValidObjectId(userId)) {
+      throw new NotFoundException('No profile photo found for this user');
+    }
+
+    const user = await this.userModel.findById(userId).exec();
+    if (!user?.photoUrl) {
+      throw new NotFoundException('No profile photo found for this user');
+    }
+
+    const { profilePhotoDir } = this.configService.get('uploads', {
+      infer: true,
+    });
+    return resolve(profilePhotoDir, user.photoUrl);
   }
 
   async getAdminStats(): Promise<AdminStats> {
     const [activePassengers, activeRiders] = await Promise.all([
-      this.userModel.countDocuments({ role: { $in: [UserRole.PASSENGER, UserRole.BOTH] } }),
-      this.userModel.countDocuments({ role: { $in: [UserRole.DRIVER, UserRole.BOTH] } }),
+      this.userModel.countDocuments({
+        role: { $in: [UserRole.PASSENGER, UserRole.BOTH] },
+      }),
+      this.userModel.countDocuments({
+        role: { $in: [UserRole.DRIVER, UserRole.BOTH] },
+      }),
     ]);
 
     return { activePassengers, activeRiders };
@@ -147,29 +233,52 @@ export class UsersService {
     userId: string,
     input: SubmitVerificationInput,
   ): Promise<void> {
-    const encryptedNicNumber = encrypt(
-      input.nicNumber,
-      this.getEncryptionKey(),
-    );
+    const key = this.getEncryptionKey();
+    const nicNumberHash = hmacDigest(input.nicNumber, key);
 
-    await this.userModel
-      .updateOne(
-        { _id: userId },
-        {
-          nicNumber: encryptedNicNumber,
-          nicDocumentUrl: input.nicDocumentUrl,
-          linkedinUrl: input.linkedinUrl,
-          'verification.identityStatus': VerificationStatus.PENDING,
-          'verification.workplaceStatus': VerificationStatus.PENDING,
-          'verification.submittedAt': new Date(),
-          $unset: {
-            'verification.reviewedBy': '',
-            'verification.reviewedAt': '',
-            'verification.rejectionReason': '',
-          },
-        },
-      )
+    // One NIC per account — the encrypted nicNumber can't be queried for equality,
+    // so match on the deterministic hash instead. The unique index (see
+    // user.schema.ts) is the real backstop against a check-then-write race.
+    const conflict = await this.userModel
+      .findOne({ nicNumberHash, _id: { $ne: userId } })
+      .select('_id')
       .exec();
+    if (conflict) {
+      throw new ConflictException(
+        'This NIC number is already linked to another account.',
+      );
+    }
+
+    const encryptedNicNumber = encrypt(input.nicNumber, key);
+
+    try {
+      await this.userModel
+        .updateOne(
+          { _id: userId },
+          {
+            nicNumber: encryptedNicNumber,
+            nicNumberHash,
+            nicDocumentUrl: input.nicDocumentUrl,
+            linkedinUrl: input.linkedinUrl,
+            'verification.identityStatus': VerificationStatus.PENDING,
+            'verification.workplaceStatus': VerificationStatus.PENDING,
+            'verification.submittedAt': new Date(),
+            $unset: {
+              'verification.reviewedBy': '',
+              'verification.reviewedAt': '',
+              'verification.rejectionReason': '',
+            },
+          },
+        )
+        .exec();
+    } catch (error) {
+      if ((error as { code?: number }).code === 11000) {
+        throw new ConflictException(
+          'This NIC number is already linked to another account.',
+        );
+      }
+      throw error;
+    }
   }
 
   async findVerificationsByStatus(
@@ -275,5 +384,20 @@ export class UsersService {
       infer: true,
     });
     return Buffer.from(encryptionKey, 'hex');
+  }
+
+  private async applyUserUpdate(
+    userId: string,
+    set: Record<string, unknown>,
+  ): Promise<OwnUserProfile> {
+    const user = await this.userModel
+      .findByIdAndUpdate(userId, { $set: set }, { returnDocument: 'after' })
+      .exec();
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return serializeOwnProfile(user);
   }
 }

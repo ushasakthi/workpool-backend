@@ -52,6 +52,13 @@ without making changes. Override the generated credentials with env vars (see `.
 $ ADMIN_EMAIL=admin@workpool.local ADMIN_PASSWORD=ChangeMe123! npm run seed:admin
 ```
 
+### Backfill NIC hashes (one-off)
+
+`npm run backfill:nic-hash` computes the `nicNumberHash` for any account that submitted
+verification before the "one NIC per account" unique index existed. It's idempotent, and where
+two old accounts already share a NIC it hashes the earliest submission and prints a warning for
+the rest so an admin can reject them.
+
 ## Authentication
 
 `src/modules/auth` implements registration, login, logout, and password reset, backed by
@@ -92,9 +99,60 @@ together (they're reviewed as one unit, sharing a single `reviewedBy`/`reviewedA
   reversible: AES-256-GCM via `common/utils/encryption.util.ts`, keyed by `ENCRYPTION_KEY` (32-byte
   hex, separate from the JWT secrets). The field is `select: false` on the schema, so it's only
   ever pulled from the DB where explicitly needed (verification submission and the admin listing).
+- **One NIC per account.** The encrypted `nicNumber` can't be queried for equality, so a
+  deterministic `nicNumberHash` (HMAC-SHA256, same key) is stored alongside it and carries a
+  unique sparse index. `PATCH /users/me/verification` returns **409** if the NIC is already
+  linked to another account (a resubmit by the same account is fine). The index is sparse, so
+  accounts that submitted before this landed (no hash) aren't retroactively de-duplicated —
+  manual admin review still backstops that.
 - **LinkedIn URLs are validated against the `linkedin.com` domain** (`LINKEDIN_URL_REGEX`) —
   matches the project rule that workplace verification is a submitted LinkedIn profile, not
   automated email-domain checking.
+
+## Profile & travel profile
+
+`src/modules/users` also owns the account profile and the commuting ("travel") profile that the
+Smart Matching Score reads from in Sprint 4.
+
+- `GET /users/me` — the caller's own full profile, including exact `travelProfile` coordinates.
+- `PATCH /users/me/profile` — partial update of `name`, `phone`, and `role`
+  (`passenger` | `driver` | `both` — lets a user opt into offering rides; `admin` is never
+  self-assignable). `POST /auth/register` accepts the same `role` set.
+- `PATCH /users/me/photo` — multipart (`photo` field), jpg/png/webp up to 5 MB. Stored on local
+  disk (`PROFILE_PHOTO_DIR`) under a random filename, same mechanism as the NIC upload — the two
+  routes share one Multer instance, switched on the form field name.
+- `PATCH /users/me/travel-profile` — partial update of the embedded `travelProfile`:
+  `homeLocation` / `workLocation` (`{ lat, lng, label }`), `workStartTime` / `workEndTime`
+  (24-hour `HH:mm`), `daysAvailable` (`Mon`…`Sun`), `preferredRole` (`driver` | `passenger` |
+  `either`), and `hideWorkplaceName`. Only the keys present in the body are written — a PATCH
+  never clears a field the client omitted.
+- `GET /users/:userId/profile` — another user's **public** profile.
+- `GET /users/:userId/photo` — the profile photo, JWT-gated (any authenticated user; photos are
+  shown to other riders during matching), never a static/public path.
+
+Design decisions:
+
+- **`travelProfile` is embedded in `User`, not a referenced collection.** It's always read
+  together with the user, has a fixed field set, and doesn't grow unbounded — the project's
+  "embedding vs referencing follows access patterns" rule.
+- **Exact home/work coordinates never leave the server for anyone but the owner.**
+  `serializers/user-profile.serializer.ts` is the single transform: the owner's own view
+  (`GET /users/me`, or `GET /users/:userId/profile` where `:userId` is the caller) returns exact
+  points; everyone else gets a point fuzzed by 300–500 m, with `travelProfile.approximate: true`
+  so the client can label it. Exact coordinates stay server-side for the SMS calculation.
+- **The fuzz is deterministic per `(userId, home|work)`.** Every request returns the same
+  approximate point, so an observer can't average many responses back to the true location. It's
+  a SHA-256 of the seed → a fixed distance/bearing offset, not `Math.random()`.
+- **`photoUrl` is serialized as the fetch route, never the stored filename** —
+  `/users/:id/photo?v=<updatedAt>`. The `?v=` tag changes whenever the user document does, so a
+  client re-fetches the image after it's replaced instead of showing a stale cached copy.
+- **Public view also drops account fields** (`email`, `phone`, `linkedinUrl`) and narrows
+  `verification` to the two public statuses.
+- **`hideWorkplaceName`** lets a user keep the workplace pin's `label` out of their public
+  profile. Workplace name is shown by default (it's professional info, and workplace is
+  LinkedIn-verified anyway); the home `label` is never shared regardless.
+- `UserSchema` indexes `travelProfile.daysAvailable` and `travelProfile.workLocation` — the
+  fields the Sprint 4 matching queries filter on.
 
 ## Compile and run the project
 

@@ -10,9 +10,18 @@ import {
   MAX_NIC_FILE_SIZE_BYTES,
   NIC_FILE_EXTENSIONS,
 } from './nic-upload.constants';
+import {
+  MAX_PROFILE_PHOTO_SIZE_BYTES,
+  PROFILE_PHOTO_EXTENSIONS,
+} from './profile-photo.constants';
 import { User, UserSchema } from './schemas/user.schema';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
+
+// The two upload routes (NIC document, profile photo) share one Multer instance,
+// switched on the form field name.
+const isPhotoField = (file: { fieldname: string }) =>
+  file.fieldname === 'photo';
 
 @Module({
   imports: [
@@ -21,22 +30,32 @@ import { UsersService } from './users.service';
       inject: [ConfigService],
       useFactory: (configService: ConfigService<AppConfig, true>) => ({
         storage: diskStorage({
-          destination: (_req, _file, cb) => {
-            const { nicDocumentDir } = configService.get('uploads', {
-              infer: true,
-            });
-            mkdirSync(nicDocumentDir, { recursive: true });
-            cb(null, nicDocumentDir);
+          destination: (_req, file, cb) => {
+            const { nicDocumentDir, profilePhotoDir } = configService.get(
+              'uploads',
+              { infer: true },
+            );
+            const dir = isPhotoField(file) ? profilePhotoDir : nicDocumentDir;
+            mkdirSync(dir, { recursive: true });
+            cb(null, dir);
           },
           filename: (_req, file, cb) => {
-            cb(null, `${randomUUID()}${NIC_FILE_EXTENSIONS[file.mimetype]}`);
+            const extensions = isPhotoField(file)
+              ? PROFILE_PHOTO_EXTENSIONS
+              : NIC_FILE_EXTENSIONS;
+            cb(null, `${randomUUID()}${extensions[file.mimetype]}`);
           },
         }),
         fileFilter: (_req, file, cb) => {
-          if (!NIC_FILE_EXTENSIONS[file.mimetype]) {
+          const extensions = isPhotoField(file)
+            ? PROFILE_PHOTO_EXTENSIONS
+            : NIC_FILE_EXTENSIONS;
+          if (!extensions[file.mimetype]) {
             cb(
               new BadRequestException(
-                'nicDocument must be a jpg, png, or pdf file',
+                isPhotoField(file)
+                  ? 'photo must be a jpg, png, or webp image'
+                  : 'nicDocument must be a jpg, png, or pdf file',
               ),
               false,
             );
@@ -44,7 +63,12 @@ import { UsersService } from './users.service';
           }
           cb(null, true);
         },
-        limits: { fileSize: MAX_NIC_FILE_SIZE_BYTES },
+        limits: {
+          fileSize: Math.max(
+            MAX_NIC_FILE_SIZE_BYTES,
+            MAX_PROFILE_PHOTO_SIZE_BYTES,
+          ),
+        },
       }),
     }),
   ],

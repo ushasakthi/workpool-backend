@@ -1,11 +1,16 @@
 import { resolve } from 'path';
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { getModelToken } from '@nestjs/mongoose';
 import { UsersService } from './users.service';
 import { User } from './schemas/user.schema';
-import { VerificationStatus } from '../../common/constants';
+import {
+  PreferredRole,
+  UserRole,
+  VerificationStatus,
+  Weekday,
+} from '../../common/constants';
 import { decrypt, encrypt } from '../../common/utils/encryption.util';
 
 describe('UsersService', () => {
@@ -13,17 +18,22 @@ describe('UsersService', () => {
   let userModel: {
     updateOne: jest.Mock;
     find: jest.Mock;
+    findOne: jest.Mock;
     findById: jest.Mock;
+    findByIdAndUpdate: jest.Mock;
   };
 
   const encryptionKeyHex = 'a'.repeat(64);
   const nicUploadDir = '/tmp/nic-documents';
+  const profilePhotoDir = '/tmp/profile-photos';
 
   beforeEach(async () => {
     userModel = {
       updateOne: jest.fn(),
       find: jest.fn(),
+      findOne: jest.fn(),
       findById: jest.fn(),
+      findByIdAndUpdate: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -35,7 +45,8 @@ describe('UsersService', () => {
           useValue: {
             get: jest.fn((key: string) => {
               if (key === 'encryptionKey') return encryptionKeyHex;
-              if (key === 'uploads') return { nicDocumentDir: nicUploadDir };
+              if (key === 'uploads')
+                return { nicDocumentDir: nicUploadDir, profilePhotoDir };
               return undefined;
             }),
           },
@@ -89,8 +100,253 @@ describe('UsersService', () => {
     });
   });
 
+  describe('updateProfile', () => {
+    it('sets only the fields present in the input', async () => {
+      const execMock = jest.fn().mockResolvedValue({
+        id: 'user-1',
+        name: 'Renamed',
+        email: 'test@example.com',
+        phone: '+94771234567',
+        role: 'passenger',
+        verification: {},
+      });
+      userModel.findByIdAndUpdate.mockReturnValue({ exec: execMock });
+
+      const result = await usersService.updateProfile('user-1', {
+        name: 'Renamed',
+        phone: undefined,
+      });
+
+      const [id, update, options] = userModel.findByIdAndUpdate.mock
+        .calls[0] as [string, Record<string, unknown>, Record<string, unknown>];
+      expect(id).toBe('user-1');
+      expect(update).toEqual({ $set: { name: 'Renamed' } });
+      expect(options).toEqual({ returnDocument: 'after' });
+      expect(result.name).toBe('Renamed');
+    });
+
+    it('lets a user switch their account role', async () => {
+      userModel.findByIdAndUpdate.mockReturnValue({
+        exec: jest.fn().mockResolvedValue({
+          id: 'user-1',
+          name: 'Test User',
+          email: 'test@example.com',
+          phone: '+94771234567',
+          role: 'both',
+          verification: {},
+        }),
+      });
+
+      const result = await usersService.updateProfile('user-1', {
+        role: UserRole.BOTH,
+      });
+
+      const [, update] = userModel.findByIdAndUpdate.mock.calls[0] as [
+        string,
+        Record<string, unknown>,
+      ];
+      expect(update).toEqual({ $set: { role: 'both' } });
+      expect(result.role).toBe('both');
+    });
+
+    it('throws NotFoundException when the user does not exist', async () => {
+      userModel.findByIdAndUpdate.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(null),
+      });
+
+      await expect(
+        usersService.updateProfile('missing-user', { name: 'X' }),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('updateProfilePhoto', () => {
+    it('stores the uploaded filename on photoUrl', async () => {
+      const execMock = jest.fn().mockResolvedValue({
+        id: 'user-1',
+        name: 'Test User',
+        email: 'test@example.com',
+        phone: '+94771234567',
+        role: 'passenger',
+        photoUrl: 'generated.jpg',
+        verification: {},
+      });
+      userModel.findByIdAndUpdate.mockReturnValue({ exec: execMock });
+
+      await usersService.updateProfilePhoto('user-1', 'generated.jpg');
+
+      const [id, update, options] = userModel.findByIdAndUpdate.mock
+        .calls[0] as [string, Record<string, unknown>, Record<string, unknown>];
+      expect(id).toBe('user-1');
+      expect(update).toEqual({ $set: { photoUrl: 'generated.jpg' } });
+      expect(options).toEqual({ returnDocument: 'after' });
+    });
+
+    it('throws NotFoundException when the user does not exist', async () => {
+      userModel.findByIdAndUpdate.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(null),
+      });
+
+      await expect(
+        usersService.updateProfilePhoto('missing-user', 'x.jpg'),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('resolveProfilePhotoPath', () => {
+    const objectId = '5f9d88b8b54764421b7156c1';
+
+    it('resolves the absolute path from the configured photo dir', async () => {
+      userModel.findById.mockReturnValue({
+        exec: jest.fn().mockResolvedValue({ photoUrl: 'abc123.jpg' }),
+      });
+
+      const result = await usersService.resolveProfilePhotoPath(objectId);
+
+      expect(result).toBe(resolve(profilePhotoDir, 'abc123.jpg'));
+    });
+
+    it('throws NotFoundException when no photo has been uploaded', async () => {
+      userModel.findById.mockReturnValue({
+        exec: jest.fn().mockResolvedValue({ photoUrl: undefined }),
+      });
+
+      await expect(
+        usersService.resolveProfilePhotoPath(objectId),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('rejects an id that is not a valid ObjectId before touching the DB', async () => {
+      await expect(
+        usersService.resolveProfilePhotoPath('not-an-id'),
+      ).rejects.toThrow(NotFoundException);
+      expect(userModel.findById).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('updateTravelProfile', () => {
+    it('writes dotted travelProfile paths and skips undefined fields', async () => {
+      const execMock = jest.fn().mockResolvedValue({
+        id: 'user-1',
+        name: 'Test User',
+        email: 'test@example.com',
+        phone: '+94771234567',
+        role: 'both',
+        verification: {},
+        travelProfile: {
+          homeLocation: { lat: 6.9, lng: 79.8, label: 'Home' },
+          daysAvailable: [Weekday.MON],
+          preferredRole: PreferredRole.EITHER,
+          hideWorkplaceName: false,
+        },
+      });
+      userModel.findByIdAndUpdate.mockReturnValue({ exec: execMock });
+
+      await usersService.updateTravelProfile('user-1', {
+        homeLocation: { lat: 6.9, lng: 79.8, label: 'Home' },
+        daysAvailable: [Weekday.MON],
+        preferredRole: PreferredRole.EITHER,
+        workStartTime: undefined,
+      });
+
+      const [, update] = userModel.findByIdAndUpdate.mock.calls[0] as [
+        string,
+        Record<string, unknown>,
+      ];
+      expect(update).toEqual({
+        $set: {
+          'travelProfile.homeLocation': { lat: 6.9, lng: 79.8, label: 'Home' },
+          'travelProfile.daysAvailable': [Weekday.MON],
+          'travelProfile.preferredRole': PreferredRole.EITHER,
+        },
+      });
+    });
+  });
+
+  describe('getPublicProfile', () => {
+    const ownerId = '5f9d88b8b54764421b7156c1';
+
+    function mockUser() {
+      return {
+        id: ownerId,
+        name: 'Test User',
+        email: 'test@example.com',
+        phone: '+94771234567',
+        role: 'both',
+        verification: {
+          identityStatus: VerificationStatus.VERIFIED,
+          workplaceStatus: VerificationStatus.PENDING,
+        },
+        travelProfile: {
+          homeLocation: { lat: 6.9271, lng: 79.8612, label: 'Home' },
+          workLocation: { lat: 6.9147, lng: 79.8734, label: 'Acme HQ' },
+          daysAvailable: [Weekday.MON],
+          hideWorkplaceName: false,
+        },
+      };
+    }
+
+    it('rejects an id that is not a valid ObjectId before touching the DB', async () => {
+      await expect(
+        usersService.getPublicProfile('not-an-id', 'requester'),
+      ).rejects.toThrow(NotFoundException);
+      expect(userModel.findById).not.toHaveBeenCalled();
+    });
+
+    it('fuzzes coordinates and drops account fields for a non-owner requester', async () => {
+      userModel.findById.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(mockUser()),
+      });
+
+      const result = await usersService.getPublicProfile(
+        ownerId,
+        'someone-else',
+      );
+
+      expect(result).not.toHaveProperty('email');
+      expect(result.travelProfile?.approximate).toBe(true);
+      expect(result.travelProfile?.homeLocation).not.toMatchObject({
+        lat: 6.9271,
+        lng: 79.8612,
+      });
+    });
+
+    it('returns exact data when the requester is the owner', async () => {
+      userModel.findById.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(mockUser()),
+      });
+
+      const result = await usersService.getPublicProfile(ownerId, ownerId);
+
+      expect(result).toHaveProperty('email', 'test@example.com');
+      expect(result.travelProfile?.approximate).toBe(false);
+      expect(result.travelProfile?.homeLocation).toMatchObject({
+        lat: 6.9271,
+        lng: 79.8612,
+      });
+    });
+
+    it('throws NotFoundException when the user does not exist', async () => {
+      userModel.findById.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(null),
+      });
+
+      await expect(
+        usersService.getPublicProfile(ownerId, 'requester'),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
   describe('submitVerification', () => {
+    function mockNoNicConflict() {
+      const selectMock = jest
+        .fn()
+        .mockReturnValue({ exec: jest.fn().mockResolvedValue(null) });
+      userModel.findOne.mockReturnValue({ select: selectMock });
+    }
+
     it('encrypts the NIC number and resets the verification review state', async () => {
+      mockNoNicConflict();
       const execMock = jest.fn().mockResolvedValue(undefined);
       userModel.updateOne.mockReturnValue({ exec: execMock });
 
@@ -114,6 +370,9 @@ describe('UsersService', () => {
           Buffer.from(encryptionKeyHex, 'hex'),
         ),
       ).toBe('199912345678');
+      // Deterministic hash stored for the "one NIC per account" unique index.
+      expect(typeof update.nicNumberHash).toBe('string');
+      expect(update.nicNumberHash).toHaveLength(64);
       expect(update['verification.identityStatus']).toBe(
         VerificationStatus.PENDING,
       );
@@ -126,6 +385,60 @@ describe('UsersService', () => {
         'verification.reviewedAt': '',
         'verification.rejectionReason': '',
       });
+    });
+
+    it('looks for an existing NIC by hash, excluding the submitting user', async () => {
+      mockNoNicConflict();
+      userModel.updateOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(undefined),
+      });
+
+      await usersService.submitVerification('user-1', {
+        nicNumber: '199912345678',
+        linkedinUrl: 'https://www.linkedin.com/in/test',
+        nicDocumentUrl: 'file.pdf',
+      });
+
+      const [filter] = userModel.findOne.mock.calls[0] as [
+        Record<string, unknown>,
+      ];
+      expect(filter).toMatchObject({ _id: { $ne: 'user-1' } });
+      expect(typeof filter.nicNumberHash).toBe('string');
+    });
+
+    it('rejects a NIC already linked to another account', async () => {
+      const selectMock = jest.fn().mockReturnValue({
+        exec: jest.fn().mockResolvedValue({ _id: 'other-user' }),
+      });
+      userModel.findOne.mockReturnValue({ select: selectMock });
+
+      await expect(
+        usersService.submitVerification('user-1', {
+          nicNumber: '199912345678',
+          linkedinUrl: 'https://www.linkedin.com/in/test',
+          nicDocumentUrl: 'file.pdf',
+        }),
+      ).rejects.toThrow(ConflictException);
+      expect(userModel.updateOne).not.toHaveBeenCalled();
+    });
+
+    it('maps a duplicate-key write error to a ConflictException', async () => {
+      mockNoNicConflict();
+      userModel.updateOne.mockReturnValue({
+        exec: jest
+          .fn()
+          .mockRejectedValue(
+            Object.assign(new Error('E11000'), { code: 11000 }),
+          ),
+      });
+
+      await expect(
+        usersService.submitVerification('user-1', {
+          nicNumber: '199912345678',
+          linkedinUrl: 'https://www.linkedin.com/in/test',
+          nicDocumentUrl: 'file.pdf',
+        }),
+      ).rejects.toThrow(ConflictException);
     });
   });
 

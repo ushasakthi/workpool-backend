@@ -27,6 +27,8 @@ import {
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { SelfOrAdminGuard } from '../../common/guards/self-or-admin.guard';
 import { SubmitVerificationDto } from './dto/submit-verification.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+import { UpdateTravelProfileDto } from './dto/update-travel-profile.dto';
 import { UsersService } from './users.service';
 
 @ApiTags('users')
@@ -40,6 +42,71 @@ export class UsersController {
   @Get('me')
   getMe(@CurrentUser() user: AuthenticatedUser) {
     return this.usersService.findMe(user.userId);
+  }
+
+  @ApiOperation({ summary: "Update the current user's name or phone" })
+  @UseGuards(JwtAuthGuard)
+  @Patch('me/profile')
+  updateProfile(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: UpdateProfileDto,
+  ) {
+    return this.usersService.updateProfile(user.userId, dto);
+  }
+
+  @ApiOperation({
+    summary: "Upload or replace the current user's profile photo",
+  })
+  @ApiConsumes('multipart/form-data')
+  @UseGuards(JwtAuthGuard)
+  @UseInterceptors(FileInterceptor('photo'))
+  @HttpCode(HttpStatus.OK)
+  @Patch('me/photo')
+  updateProfilePhoto(
+    @CurrentUser() user: AuthenticatedUser,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('photo file is required');
+    }
+    return this.usersService.updateProfilePhoto(user.userId, file.filename);
+  }
+
+  @ApiOperation({
+    summary:
+      "Update the current user's travel profile (commute locations, schedule, availability)",
+  })
+  @UseGuards(JwtAuthGuard)
+  @Patch('me/travel-profile')
+  updateTravelProfile(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: UpdateTravelProfileDto,
+  ) {
+    return this.usersService.updateTravelProfile(user.userId, dto);
+  }
+
+  @ApiOperation({
+    summary:
+      "Get another user's public profile — approximate home/work location only, never exact coordinates",
+  })
+  @UseGuards(JwtAuthGuard)
+  @Get(':userId/profile')
+  getPublicProfile(
+    @Param('userId') userId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.usersService.getPublicProfile(userId, user.userId);
+  }
+
+  @ApiOperation({ summary: "Fetch a user's profile photo" })
+  @UseGuards(JwtAuthGuard)
+  @Get(':userId/photo')
+  async getProfilePhoto(
+    @Param('userId') userId: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    const filePath = await this.usersService.resolveProfilePhotoPath(userId);
+    res.sendFile(filePath);
   }
 
   @ApiOperation({

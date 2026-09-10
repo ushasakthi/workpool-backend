@@ -14,6 +14,8 @@ export interface AppConfig {
   encryptionKey: string;
   uploads: {
     nicDocumentDir: string;
+    profilePhotoDir: string;
+    vehiclePhotoDir: string;
   };
   mail: {
     host: string;
@@ -43,6 +45,10 @@ export default (): AppConfig => ({
   encryptionKey: process.env.ENCRYPTION_KEY!,
   uploads: {
     nicDocumentDir: process.env.NIC_UPLOAD_DIR ?? './storage/nic-documents',
+    profilePhotoDir:
+      process.env.PROFILE_PHOTO_DIR ?? './storage/profile-photos',
+    vehiclePhotoDir:
+      process.env.VEHICLE_PHOTO_DIR ?? './storage/vehicle-photos',
   },
   mail: {
     host: process.env.SMTP_HOST ?? 'localhost',
