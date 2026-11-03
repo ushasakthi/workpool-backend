@@ -7,6 +7,8 @@ export const SAVINGS_RATES = {
   parkingLkr: 400,
   // road distance is roughly 1.3x the straight-line distance
   roadFactor: 1.3,
+  // kg CO2 per road km: 2.35 kg per litre of petrol ÷ 12 km/l
+  co2PerKm: 0.196,
 };
 
 // one completed shared ride
@@ -24,6 +26,7 @@ export interface PassengerSavings {
   contributions: number;
   saved: number;
   avgContribution: number;
+  co2SavedKg: number;
 }
 
 export interface DriverSharing {
@@ -33,11 +36,22 @@ export interface DriverSharing {
   costsShared: number;
   yourShare: number;
   avgShared: number;
+  co2SavedKg: number;
 }
 
 export function tripCost(distanceKm: number): number {
   const roadKm = distanceKm * SAVINGS_RATES.roadFactor;
   return roadKm * SAVINGS_RATES.perKmLkr + SAVINGS_RATES.parkingLkr;
+}
+
+// each shared trip is one car trip someone didn't make alone, 1 decimal
+export function co2SavedKg(trips: SavingsTrip[]): number {
+  const kg = trips.reduce(
+    (sum, t) =>
+      sum + t.distanceKm * SAVINGS_RATES.roadFactor * SAVINGS_RATES.co2PerKm,
+    0,
+  );
+  return Math.round(kg * 10) / 10;
 }
 
 const round = (value: number) => Math.round(value);
@@ -53,6 +67,7 @@ export function passengerSavings(trips: SavingsTrip[]): PassengerSavings {
     // never shown as negative: a pricey ride doesn't "cost" savings
     saved: round(Math.max(0, soloCost - contributions)),
     avgContribution: trips.length ? round(contributions / trips.length) : 0,
+    co2SavedKg: co2SavedKg(trips),
   };
 }
 
@@ -70,6 +85,7 @@ export function driverSharing(trips: SavingsTrip[]): DriverSharing {
     costsShared: round(shared),
     yourShare: round(total - shared),
     avgShared: trips.length ? round(shared / trips.length) : 0,
+    co2SavedKg: co2SavedKg(trips),
   };
 }
 

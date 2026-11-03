@@ -1,4 +1,5 @@
 import {
+  co2SavedKg,
   driverSharing,
   monthRange,
   passengerSavings,
@@ -17,6 +18,22 @@ describe('tripCost', () => {
   });
 });
 
+describe('co2SavedKg', () => {
+  it('is road distance x CO2 per km, rounded to 1 decimal', () => {
+    // 2 x 10 km x 1.3 x 0.196 = 5.096
+    expect(
+      co2SavedKg([
+        { distanceKm: 10, contribution: 450 },
+        { distanceKm: 10, contribution: 350 },
+      ]),
+    ).toBe(5.1);
+  });
+
+  it('is 0 with no rides', () => {
+    expect(co2SavedKg([])).toBe(0);
+  });
+});
+
 describe('passengerSavings', () => {
   it('compares driving alone with the contributions paid', () => {
     const result = passengerSavings([
@@ -30,6 +47,7 @@ describe('passengerSavings', () => {
       contributions: 800,
       saved: 1040,
       avgContribution: 400,
+      co2SavedKg: 5.1,
     });
   });
 
@@ -46,6 +64,7 @@ describe('passengerSavings', () => {
       contributions: 0,
       saved: 0,
       avgContribution: 0,
+      co2SavedKg: 0,
     });
   });
 });
@@ -63,6 +82,7 @@ describe('driverSharing', () => {
       costsShared: 800,
       yourShare: 1040,
       avgShared: 400,
+      co2SavedKg: 5.1,
     });
   });
 
