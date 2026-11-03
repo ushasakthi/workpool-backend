@@ -11,12 +11,12 @@ export const validationSchema = Joi.object({
   JWT_REFRESH_SECRET: Joi.string().required(),
   JWT_REFRESH_EXPIRY: Joi.string().required(),
   CORS_ORIGINS: Joi.string().default(''),
-  // 32-byte AES-256 key, hex-encoded (64 hex chars) — encrypts nicNumber at rest
+  // 64 hex chars, used to encrypt nicNumber
   ENCRYPTION_KEY: Joi.string().hex().length(64).required(),
   NIC_UPLOAD_DIR: Joi.string().default('./storage/nic-documents'),
   PROFILE_PHOTO_DIR: Joi.string().default('./storage/profile-photos'),
   VEHICLE_PHOTO_DIR: Joi.string().default('./storage/vehicle-photos'),
-  // Local dev default points at Mailpit (brew install mailpit; SMTP on 1025, web UI on :8025).
+  // Mailpit for local dev (SMTP 1025, UI 8025)
   SMTP_HOST: Joi.string().default('localhost'),
   SMTP_PORT: Joi.number().default(1025),
   SMTP_SECURE: Joi.string().valid('true', 'false').default('false'),

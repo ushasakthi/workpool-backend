@@ -36,9 +36,8 @@ export function decrypt(payload: string, key: Buffer): string {
   ]).toString('utf8');
 }
 
-// Deterministic keyed hash (HMAC-SHA256, hex). The same input always produces the
-// same digest, so it can back a unique index / equality lookup on a value that's
-// stored encrypted (and therefore non-deterministic). Not reversible.
+// HMAC-SHA256: same input gives the same hash, so it can be used for a
+// unique index on an encrypted field
 export function hmacDigest(value: string, key: Buffer): string {
   return createHmac('sha256', key).update(value).digest('hex');
 }

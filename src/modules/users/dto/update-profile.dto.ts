@@ -10,8 +10,7 @@ import {
 import { SELF_ASSIGNABLE_ROLES, UserRole } from '../../../common/constants';
 import { PHONE_REGEX } from '../../../common/utils/validation-patterns';
 
-// All fields optional — this is a partial update. The photo is set separately via the
-// multipart PATCH /users/me/photo route.
+// photo uses PATCH /users/me/photo
 export class UpdateProfileDto {
   @ApiPropertyOptional({ example: 'Nadeesha Perera' })
   @IsOptional()
@@ -27,8 +26,7 @@ export class UpdateProfileDto {
   })
   phone?: string;
 
-  // Lets a user switch between finding rides / offering rides / both. `admin` is
-  // never self-assignable.
+  // admin can't be self-assigned
   @ApiPropertyOptional({ enum: SELF_ASSIGNABLE_ROLES })
   @IsOptional()
   @IsIn(SELF_ASSIGNABLE_ROLES)

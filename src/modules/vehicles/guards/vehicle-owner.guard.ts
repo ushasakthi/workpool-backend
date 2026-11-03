@@ -11,8 +11,7 @@ import { AuthenticatedUser } from '../../../common/decorators/current-user.decor
 import { isOwnerOrAdmin } from '../../../common/utils/ownership.util';
 import { Vehicle, VehicleDocument } from '../schemas/vehicle.schema';
 
-// Server-side ownership enforcement for PATCH /vehicles/:id and its photo route.
-// The frontend hiding an edit button is not a control — this is.
+// only the vehicle owner or an admin can change it
 @Injectable()
 export class VehicleOwnerGuard implements CanActivate {
   constructor(

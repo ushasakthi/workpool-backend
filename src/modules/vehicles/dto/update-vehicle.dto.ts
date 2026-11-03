@@ -2,8 +2,7 @@ import { ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { IsBoolean, IsOptional } from 'class-validator';
 import { CreateVehicleDto } from './create-vehicle.dto';
 
-// Partial update — every create field is optional here, same validation rules.
-// The photo is updated through PATCH /vehicles/:id/photo, not this body.
+// photo is updated through PATCH /vehicles/:id/photo
 export class UpdateVehicleDto extends PartialType(CreateVehicleDto) {
   @ApiPropertyOptional({
     description:

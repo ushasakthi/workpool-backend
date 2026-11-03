@@ -8,8 +8,6 @@ import {
   Min,
 } from 'class-validator';
 
-// Request-body shape for a { lat, lng, label } map point. Shared by the
-// travel-profile and ride DTOs.
 export class GeoPointDto {
   @ApiProperty({ example: 6.9271 })
   @IsNumber()

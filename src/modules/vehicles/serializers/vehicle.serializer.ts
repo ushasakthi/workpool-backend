@@ -26,9 +26,7 @@ export function serializeVehicle(vehicle: VehicleDocument): VehicleView {
   };
 }
 
-// The stored value is a local filename — expose it only as the authenticated
-// fetch route, with a version tag so the client re-fetches after the photo is
-// replaced. Same convention as the user profile photo.
+// return the photo route, not the filename. ?v= makes the app reload a new photo
 function photoRoute(vehicle: VehicleDocument): string | undefined {
   if (!vehicle.photoUrl) {
     return undefined;

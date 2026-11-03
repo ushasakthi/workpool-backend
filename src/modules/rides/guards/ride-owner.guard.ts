@@ -11,8 +11,7 @@ import { AuthenticatedUser } from '../../../common/decorators/current-user.decor
 import { isOwnerOrAdmin } from '../../../common/utils/ownership.util';
 import { Ride, RideDocument } from '../schemas/ride.schema';
 
-// Server-side ownership enforcement for PATCH /rides/:id (edit / pause / cancel).
-// Only the driver who posted the ride (or an admin) may change it.
+// only the ride's driver or an admin can change it
 @Injectable()
 export class RideOwnerGuard implements CanActivate {
   constructor(

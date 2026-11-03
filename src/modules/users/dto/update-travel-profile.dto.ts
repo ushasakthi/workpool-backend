@@ -13,8 +13,6 @@ import { PreferredRole, Weekday } from '../../../common/constants';
 import { TIME_HHMM_REGEX } from '../../../common/utils/validation-patterns';
 import { GeoPointDto } from './geo-point.dto';
 
-// Partial update of the embedded User.travelProfile. Every field is optional;
-// only the ones present in the body are written.
 export class UpdateTravelProfileDto {
   @ApiPropertyOptional({ type: GeoPointDto })
   @IsOptional()

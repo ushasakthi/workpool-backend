@@ -1,5 +1,4 @@
-// Weekday tokens for TravelProfile.daysAvailable. Kept as short strings so the
-// frontend constants file can mirror them value-for-value.
+// frontend weekday.enum.ts must match these
 export enum Weekday {
   MON = 'Mon',
   TUE = 'Tue',

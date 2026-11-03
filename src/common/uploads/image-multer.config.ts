@@ -8,11 +8,8 @@ import {
   MAX_IMAGE_UPLOAD_BYTES,
 } from './image-upload.constants';
 
-// Multer config for a single-image upload route: stores the file on local disk
-// under `dir` with a random name, accepts jpg/png/webp only, and caps the size
-// at MAX_IMAGE_UPLOAD_BYTES. The stored filename is what the route persists —
-// the file is served back only through an authenticated GET route, never a
-// static path. Same mechanism as the NIC / profile-photo uploads.
+// Single image upload: random filename, jpg/png/webp, size limit.
+// Files are only served through an authenticated route.
 export function imageMulterOptions(dir: string): MulterOptions {
   return {
     storage: diskStorage({

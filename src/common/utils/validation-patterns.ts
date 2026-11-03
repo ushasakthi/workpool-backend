@@ -11,8 +11,6 @@ export const LINKEDIN_URL_REGEX = /^https?:\/\/([\w-]+\.)?linkedin\.com\/.+/i;
 // 24-hour clock time, e.g. "08:30" or "17:05" — used for work start/end times.
 export const TIME_HHMM_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-// Sri Lankan vehicle number plate. Accepts the current letter series
-// ("CAB-1234", with an optional 2–3 letter province code e.g. "WP CAB-1234")
-// and the older numeric series ("251-1234"). Stored normalised to upper case.
+// Sri Lankan plate: "CAB-1234", "WP CAB-1234" or "251-1234"
 export const PLATE_NUMBER_REGEX =
   /^(?:[A-Z]{2,3}\s)?(?:[A-Z]{2,3}|\d{2,3})-\d{4}$/i;

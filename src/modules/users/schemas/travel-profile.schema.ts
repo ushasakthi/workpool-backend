@@ -5,14 +5,10 @@ import {
   GeoPointSchema,
 } from '../../../common/schemas/geo-point.schema';
 
-// GeoPoint moved to common/ once Ride (origin/destination) needed the same shape.
-// Re-exported here so existing imports (serializers/user-profile.serializer.ts)
-// keep resolving. The privacy transform that fuzzes it for other users lives in
-// serializers/user-profile.serializer.ts.
+// GeoPoint is in common/ now, re-exported for old imports
 export { GeoPoint, GeoPointSchema };
 
-// Embedded in User (not referenced): it's always read together with the user,
-// has a fixed set of fields, and doesn't grow unbounded. See the data model notes.
+// embedded in User, always loaded with it
 @Schema({ _id: false })
 export class TravelProfile {
   @Prop({ type: GeoPointSchema })
@@ -33,8 +29,7 @@ export class TravelProfile {
   @Prop({ type: String, enum: PreferredRole })
   preferredRole?: PreferredRole;
 
-  // When true, other users see only the approximate work point, never the
-  // workplace name/label. The owner always sees their own exact details.
+  // if true, other users don't see the workplace name
   @Prop({ default: false })
   hideWorkplaceName!: boolean;
 }

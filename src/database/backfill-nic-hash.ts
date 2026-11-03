@@ -13,10 +13,8 @@ interface NicUser {
   submittedAt?: Date;
 }
 
-// One-off: backfills `nicNumberHash` for accounts that submitted verification
-// before the "one NIC per account" unique index existed. Where two old accounts
-// already share a NIC it hashes the earliest submission and leaves the rest
-// without a hash, printing a warning — an admin resolves those by hand.
+// One-off script: adds nicNumberHash to old accounts.
+// If two accounts share a NIC, only the earliest gets it and a warning is printed.
 async function backfillNicHash(): Promise<void> {
   const app = await NestFactory.createApplicationContext(AppModule);
 
@@ -66,8 +64,7 @@ async function backfillNicHash(): Promise<void> {
           (a.submittedAt?.getTime() ?? 0) - (b.submittedAt?.getTime() ?? 0),
       );
 
-      // Idempotent: if a previous run (or a live submission) already claimed
-      // this hash, everyone in the group is a duplicate.
+      // hash already taken, so they're all duplicates
       const existing = await users.findOne(
         { nicNumberHash: hash },
         { projection: { _id: 1 } },

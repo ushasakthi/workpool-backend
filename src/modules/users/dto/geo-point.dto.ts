@@ -1,3 +1,2 @@
-// GeoPointDto moved to common/ once the ride DTOs needed the same shape.
-// Re-exported here so existing imports keep resolving.
+// moved to common/, re-exported for old imports
 export { GeoPointDto } from '../../../common/dto/geo-point.dto';
