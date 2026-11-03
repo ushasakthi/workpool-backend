@@ -1,5 +1,10 @@
-import { RideStatus, Weekday } from '../../../common/constants';
+import {
+  RideStatus,
+  VerificationStatus,
+  Weekday,
+} from '../../../common/constants';
 import { GeoPoint } from '../../../common/schemas/geo-point.schema';
+import { SmsResult } from '../matching/smart-matching.service';
 import { RideDocument } from '../schemas/ride.schema';
 
 export interface GeoPointView {
@@ -17,10 +22,40 @@ export interface RideView {
   departureTime: Date;
   daysOfWeek: Weekday[];
   seatsAvailable: number;
-  // Cost-sharing contribution toward shared fuel / running costs — not a fare.
+  // shared fuel cost, not a fare
   costContribution: number;
   status: RideStatus;
 }
+
+export interface RideDriverView {
+  id: string;
+  name: string;
+  photoUrl?: string;
+  verification: {
+    identityStatus: VerificationStatus;
+    workplaceStatus: VerificationStatus;
+  };
+  // 0-100, null until calculated
+  trustScore: number | null;
+}
+
+// a ride as seen by a passenger: their match score, how far the pickup is
+// from their home, and who's driving
+export interface RideWithMatchView extends RideView {
+  match: SmsResult;
+  // null when the passenger has no home location
+  pickupDistanceKm: number | null;
+  driver: RideDriverView;
+}
+
+export interface RideSearchPage {
+  items: RideWithMatchView[];
+  page: number;
+  limit: number;
+  total: number;
+}
+
+export type RideDetailView = RideWithMatchView;
 
 export function serializeRide(ride: RideDocument): RideView {
   return {

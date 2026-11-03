@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model } from 'mongoose';
@@ -35,8 +39,7 @@ export class VehiclesService {
     ownerId: string,
     input: CreateVehicleInput,
   ): Promise<VehicleView> {
-    // `new … .save()` rather than `.create()` — a schema field named `model`
-    // collides with Mongoose's Document.model() in the `.create()` overload.
+    // .create() clashes with the `model` field, so use new + save
     const vehicle = await new this.vehicleModel({ ...input, ownerId }).save();
     return serializeVehicle(vehicle);
   }
@@ -73,10 +76,7 @@ export class VehiclesService {
     return resolve(vehiclePhotoDir, vehicle.photoUrl);
   }
 
-  // Used by RidesService when a driver posts or edits a ride: the vehicle must
-  // exist and belong to that driver. Returns the doc so the caller can check
-  // the ride's seat count against the vehicle's capacity.
-  // TODO(sprint4): also reject `!vehicle.isActive` here once ride posting lands.
+  // checks the vehicle exists and belongs to the driver
   async findOwnedVehicleOrThrow(
     vehicleId: string,
     ownerId: string,
@@ -87,6 +87,9 @@ export class VehiclesService {
 
     if (!vehicle || String(vehicle.ownerId) !== ownerId) {
       throw new NotFoundException('Vehicle not found');
+    }
+    if (!vehicle.isActive) {
+      throw new BadRequestException('This vehicle is inactive');
     }
     return vehicle;
   }
