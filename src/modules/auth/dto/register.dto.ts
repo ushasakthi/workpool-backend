@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  Equals,
   IsEmail,
   IsIn,
   IsNotEmpty,
@@ -51,4 +52,11 @@ export class RegisterDto {
   @IsOptional()
   @IsIn(SELF_ASSIGNABLE_ROLES)
   role?: UserRole;
+
+  // must be exactly true: no account without agreeing it's cost-sharing, not hire
+  @ApiProperty({ example: true })
+  @Equals(true, {
+    message: 'You must accept the Terms & Conditions to create an account',
+  })
+  acceptedTerms!: boolean;
 }
