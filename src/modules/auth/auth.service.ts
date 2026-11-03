@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   UnauthorizedException,
@@ -13,6 +14,10 @@ import { compareValue, hashValue } from '../../common/utils/hash.util';
 import { MailService } from '../mail/mail.service';
 import { UsersService } from '../users/users.service';
 import { UserDocument } from '../users/schemas/user.schema';
+import { TERMS_VERSION } from './terms';
+
+export const SUSPENDED_MESSAGE =
+  'This account is suspended. Contact WorkPool support.';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 
@@ -61,6 +66,9 @@ export class AuthService {
         passwordHash,
         phone: dto.phone,
         role: dto.role ?? UserRole.PASSENGER,
+        // the DTO only lets acceptedTerms === true through
+        termsAcceptedAt: new Date(),
+        termsVersion: TERMS_VERSION,
       });
     } catch (err) {
       if (this.isDuplicateKeyError(err)) {
@@ -83,6 +91,10 @@ export class AuthService {
 
     if (!user || !passwordMatches) {
       throw new UnauthorizedException('Invalid email or password');
+    }
+    // checked after the password, so it doesn't reveal which emails exist
+    if (user.suspended) {
+      throw new ForbiddenException(SUSPENDED_MESSAGE);
     }
 
     const tokens = await this.issueTokens(user);
@@ -109,6 +121,9 @@ export class AuthService {
 
     if (!user || !tokenMatches) {
       throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+    if (user.suspended) {
+      throw new ForbiddenException(SUSPENDED_MESSAGE);
     }
 
     return this.issueTokens(user);

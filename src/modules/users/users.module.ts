@@ -14,18 +14,21 @@ import {
   MAX_PROFILE_PHOTO_SIZE_BYTES,
   PROFILE_PHOTO_EXTENSIONS,
 } from './profile-photo.constants';
+import { AdminLogModule } from '../admin-log/admin-log.module';
+import { TrustScoreModule } from '../trust-score/trust-score.module';
 import { User, UserSchema } from './schemas/user.schema';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 
-// The two upload routes (NIC document, profile photo) share one Multer instance,
-// switched on the form field name.
+// NIC and photo uploads share one Multer config
 const isPhotoField = (file: { fieldname: string }) =>
   file.fieldname === 'photo';
 
 @Module({
   imports: [
     MongooseModule.forFeature([{ name: User.name, schema: UserSchema }]),
+    TrustScoreModule,
+    AdminLogModule,
     MulterModule.registerAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService<AppConfig, true>) => ({

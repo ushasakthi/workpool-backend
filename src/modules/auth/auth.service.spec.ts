@@ -1,8 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { AuthService } from './auth.service';
+import { TERMS_VERSION } from './terms';
 import { MailService } from '../mail/mail.service';
 import { UsersService } from '../users/users.service';
 import { UserDocument } from '../users/schemas/user.schema';
@@ -89,12 +94,15 @@ describe('AuthService', () => {
         email: 'test@example.com',
         password: 'CorrectPass1',
         phone: '+94771234567',
+        acceptedTerms: true,
       });
 
       expect(usersService.create).toHaveBeenCalledWith(
         expect.objectContaining({
           email: 'test@example.com',
           role: UserRole.PASSENGER,
+          termsVersion: TERMS_VERSION,
+          termsAcceptedAt: expect.any(Date) as Date,
         }),
       );
       expect(result.accessToken).toBe('signed.jwt.token');
@@ -121,6 +129,7 @@ describe('AuthService', () => {
           email: 'test@example.com',
           password: 'CorrectPass1',
           phone: '+94771234567',
+          acceptedTerms: true,
         }),
       ).rejects.toThrow(ConflictException);
       expect(usersService.create).not.toHaveBeenCalled();
@@ -159,6 +168,19 @@ describe('AuthService', () => {
           password: 'CorrectPass1',
         }),
       ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('refuses a suspended account even with the right password', async () => {
+      usersService.findByEmail.mockResolvedValue(
+        await buildMockUser({ suspended: true }),
+      );
+
+      await expect(
+        authService.login({
+          email: 'test@example.com',
+          password: 'CorrectPass1',
+        }),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 

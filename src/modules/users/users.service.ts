@@ -9,12 +9,15 @@ import { isValidObjectId, Model } from 'mongoose';
 import { resolve } from 'path';
 import { AppConfig } from '../../config/configuration';
 import {
+  AdminAction,
   PreferredRole,
   UserRole,
   VerificationStatus,
   Weekday,
 } from '../../common/constants';
 import { buildUpdateSet } from '../../common/utils/build-update-set';
+import { AdminLogService } from '../admin-log/admin-log.service';
+import { TrustScoreUpdater } from '../trust-score/trust-score.updater';
 import {
   decrypt,
   encrypt,
@@ -34,6 +37,8 @@ export interface CreateUserInput {
   passwordHash: string;
   phone: string;
   role: UserRole;
+  termsAcceptedAt: Date;
+  termsVersion: string;
 }
 
 export interface SubmitVerificationInput {
@@ -75,16 +80,13 @@ export interface UpdateTravelProfileInput {
   hideWorkplaceName?: boolean;
 }
 
-export interface AdminStats {
-  activePassengers: number;
-  activeRiders: number;
-}
-
 @Injectable()
 export class UsersService {
   constructor(
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
     private readonly configService: ConfigService<AppConfig, true>,
+    private readonly trustScoreUpdater: TrustScoreUpdater,
+    private readonly adminLogService: AdminLogService,
   ) {}
 
   create(input: CreateUserInput): Promise<UserDocument> {
@@ -149,6 +151,28 @@ export class UsersService {
       .exec();
   }
 
+  // id -> name, for lists that show who wrote something
+  async findNames(ids: string[]): Promise<Map<string, string>> {
+    const users = await this.userModel
+      .find({ _id: { $in: ids } })
+      .select('name')
+      .exec();
+    return new Map(users.map((user) => [user.id, user.name]));
+  }
+
+  // id -> name + email, admin screens only
+  async findContacts(
+    ids: string[],
+  ): Promise<Map<string, { name: string; email: string }>> {
+    const users = await this.userModel
+      .find({ _id: { $in: ids } })
+      .select('name email')
+      .exec();
+    return new Map(
+      users.map((user) => [user.id, { name: user.name, email: user.email }]),
+    );
+  }
+
   async findMe(userId: string): Promise<OwnUserProfile> {
     const user = await this.userModel.findById(userId).exec();
     if (!user) {
@@ -158,8 +182,7 @@ export class UsersService {
     return serializeOwnProfile(user);
   }
 
-  // Another user's profile — home/work coordinates are fuzzed and account fields
-  // (email/phone) are dropped unless the requester is the owner.
+  // non-owners get fuzzed locations and no email/phone
   async getPublicProfile(
     userId: string,
     requesterId: string,
@@ -216,17 +239,14 @@ export class UsersService {
     return resolve(profilePhotoDir, user.photoUrl);
   }
 
-  async getAdminStats(): Promise<AdminStats> {
-    const [activePassengers, activeRiders] = await Promise.all([
-      this.userModel.countDocuments({
-        role: { $in: [UserRole.PASSENGER, UserRole.BOTH] },
-      }),
-      this.userModel.countDocuments({
-        role: { $in: [UserRole.DRIVER, UserRole.BOTH] },
-      }),
-    ]);
-
-    return { activePassengers, activeRiders };
+  // checked on every authenticated request so a suspension applies at once
+  async isSuspended(userId: string): Promise<boolean> {
+    const user = await this.userModel
+      .findById(userId)
+      .select('suspended')
+      .lean()
+      .exec();
+    return user?.suspended === true;
   }
 
   async submitVerification(
@@ -236,9 +256,8 @@ export class UsersService {
     const key = this.getEncryptionKey();
     const nicNumberHash = hmacDigest(input.nicNumber, key);
 
-    // One NIC per account — the encrypted nicNumber can't be queried for equality,
-    // so match on the deterministic hash instead. The unique index (see
-    // user.schema.ts) is the real backstop against a check-then-write race.
+    // nicNumber is encrypted, so check duplicates with the hash.
+    // The unique index also catches two requests at once.
     const conflict = await this.userModel
       .findOne({ nicNumberHash, _id: { $ne: userId } })
       .select('_id')
@@ -285,8 +304,7 @@ export class UsersService {
     status?: VerificationStatus,
   ): Promise<VerificationSummary[]> {
     const filter: Record<string, unknown> = {
-      // Every user defaults to identityStatus/workplaceStatus "pending" at registration,
-      // even if they never submit NIC/LinkedIn — only list users who actually submitted.
+      // only users who actually submitted NIC/LinkedIn
       'verification.submittedAt': { $exists: true },
     };
     if (status) {
@@ -365,6 +383,19 @@ export class UsersService {
     if (result.matchedCount === 0) {
       throw new NotFoundException('User not found');
     }
+
+    await this.adminLogService.record({
+      adminId,
+      action:
+        status === VerificationStatus.VERIFIED
+          ? AdminAction.VERIFICATION_APPROVED
+          : AdminAction.VERIFICATION_REJECTED,
+      targetUserId: userId,
+      note: rejectionReason,
+    });
+
+    // verification is worth 40 Trust Score points
+    await this.trustScoreUpdater.recalculate(userId);
   }
 
   async resolveNicDocumentPath(userId: string): Promise<string> {

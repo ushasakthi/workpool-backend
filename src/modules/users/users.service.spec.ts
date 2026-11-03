@@ -3,9 +3,12 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { getModelToken } from '@nestjs/mongoose';
+import { AdminLogService } from '../admin-log/admin-log.service';
+import { TrustScoreUpdater } from '../trust-score/trust-score.updater';
 import { UsersService } from './users.service';
 import { User } from './schemas/user.schema';
 import {
+  AdminAction,
   PreferredRole,
   UserRole,
   VerificationStatus,
@@ -15,6 +18,8 @@ import { decrypt, encrypt } from '../../common/utils/encryption.util';
 
 describe('UsersService', () => {
   let usersService: UsersService;
+  let trustScoreUpdater: { recalculate: jest.Mock };
+  let adminLogService: { record: jest.Mock };
   let userModel: {
     updateOne: jest.Mock;
     find: jest.Mock;
@@ -36,10 +41,15 @@ describe('UsersService', () => {
       findByIdAndUpdate: jest.fn(),
     };
 
+    trustScoreUpdater = { recalculate: jest.fn() };
+    adminLogService = { record: jest.fn() };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         UsersService,
         { provide: getModelToken(User.name), useValue: userModel },
+        { provide: TrustScoreUpdater, useValue: trustScoreUpdater },
+        { provide: AdminLogService, useValue: adminLogService },
         {
           provide: ConfigService,
           useValue: {
@@ -86,6 +96,13 @@ describe('UsersService', () => {
         verification: {
           identityStatus: VerificationStatus.PENDING,
           workplaceStatus: VerificationStatus.PENDING,
+        },
+        // no history yet, so not calculated
+        trustScore: {
+          score: null,
+          completedRides: 0,
+          ratingCount: 0,
+          averageRating: 0,
         },
       });
     });
@@ -569,6 +586,13 @@ describe('UsersService', () => {
       );
       expect(update['verification.reviewedBy']).toBe('admin-1');
       expect(update.$unset).toEqual({ 'verification.rejectionReason': '' });
+      expect(trustScoreUpdater.recalculate).toHaveBeenCalledWith('user-1');
+      expect(adminLogService.record).toHaveBeenCalledWith({
+        adminId: 'admin-1',
+        action: AdminAction.VERIFICATION_APPROVED,
+        targetUserId: 'user-1',
+        note: undefined,
+      });
     });
 
     it('stores the rejection reason on rejection', async () => {

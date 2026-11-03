@@ -4,7 +4,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { UserRole } from '../../common/constants';
-import { UsersService } from '../users/users.service';
+import { AdminService } from './admin.service';
 
 @ApiTags('admin')
 @ApiBearerAuth()
@@ -12,11 +12,11 @@ import { UsersService } from '../users/users.service';
 @Roles(UserRole.ADMIN)
 @Controller('admin/stats')
 export class AdminStatsController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(private readonly adminService: AdminService) {}
 
   @ApiOperation({ summary: 'Get admin dashboard summary counts' })
   @Get()
   getStats() {
-    return this.usersService.getAdminStats();
+    return this.adminService.getStats();
   }
 }
