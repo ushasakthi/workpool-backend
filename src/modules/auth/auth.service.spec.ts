@@ -44,6 +44,7 @@ describe('AuthService', () => {
             findByEmail: jest.fn(),
             create: jest.fn(),
             setRefreshTokenHash: jest.fn().mockResolvedValue(undefined),
+            setPushToken: jest.fn().mockResolvedValue(undefined),
             findByIdWithRefreshHash: jest.fn(),
             setPasswordResetToken: jest.fn().mockResolvedValue(undefined),
             findByPasswordResetToken: jest.fn(),
@@ -225,6 +226,12 @@ describe('AuthService', () => {
         'user-1',
         null,
       );
+    });
+
+    it('clears the push token, so the phone stops getting notifications', async () => {
+      await authService.logout('user-1');
+
+      expect(usersService.setPushToken).toHaveBeenCalledWith('user-1', null);
     });
   });
 

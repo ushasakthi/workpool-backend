@@ -7,6 +7,7 @@ import { TrustScoreUpdater } from '../trust-score/trust-score.updater';
 import { UsersService } from '../users/users.service';
 import { BookingsService } from './bookings.service';
 import { BookingSide } from './dto/list-my-bookings-query.dto';
+import { BookingNotifier } from './notifications/booking-notifier';
 import { Review } from '../reviews/schemas/review.schema';
 import { Booking } from './schemas/booking.schema';
 
@@ -36,6 +37,11 @@ describe('BookingsService', () => {
   };
   let usersService: { getPublicProfile: jest.Mock };
   let trustScoreUpdater: { recalculate: jest.Mock };
+  let notifier: {
+    requested: jest.Mock;
+    answered: jest.Mock;
+    cancelled: jest.Mock;
+  };
   let reviewModel: { exists: jest.Mock };
   let lastSaved: Record<string, unknown> | undefined;
 
@@ -82,6 +88,11 @@ describe('BookingsService', () => {
     };
     usersService = { getPublicProfile: jest.fn() };
     trustScoreUpdater = { recalculate: jest.fn() };
+    notifier = {
+      requested: jest.fn(),
+      answered: jest.fn(),
+      cancelled: jest.fn(),
+    };
     reviewModel = { exists: jest.fn().mockReturnValue(query(null)) };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -92,6 +103,7 @@ describe('BookingsService', () => {
         { provide: RidesService, useValue: ridesService },
         { provide: UsersService, useValue: usersService },
         { provide: TrustScoreUpdater, useValue: trustScoreUpdater },
+        { provide: BookingNotifier, useValue: notifier },
       ],
     }).compile();
 
@@ -112,6 +124,7 @@ describe('BookingsService', () => {
       });
       expect(ridesService.reserveSeats).not.toHaveBeenCalled();
       expect(result.status).toBe(BookingStatus.REQUESTED);
+      expect(notifier.requested).toHaveBeenCalled();
     });
 
     it('rejects booking your own ride', async () => {
@@ -168,6 +181,7 @@ describe('BookingsService', () => {
       });
       expect(ridesService.reserveSeats).toHaveBeenCalledWith(RIDE_ID, 2);
       expect(result.status).toBe(BookingStatus.ACCEPTED);
+      expect(notifier.answered).toHaveBeenCalledWith(expect.anything(), true);
     });
 
     it('refuses a request that was already answered', async () => {
@@ -188,6 +202,8 @@ describe('BookingsService', () => {
       await expect(service.accept('booking-1')).rejects.toThrow(
         'Not enough seats left on this ride',
       );
+      // the passenger isn't told about an accept that was rolled back
+      expect(notifier.answered).not.toHaveBeenCalled();
       expect(bookingModel.updateOne).toHaveBeenCalledWith(
         { _id: 'booking-1' },
         {
@@ -207,6 +223,7 @@ describe('BookingsService', () => {
       const result = await service.reject('booking-1');
 
       expect(result.status).toBe(BookingStatus.REJECTED);
+      expect(notifier.answered).toHaveBeenCalledWith(expect.anything(), false);
     });
 
     it('refuses a request that was already answered', async () => {
@@ -234,6 +251,10 @@ describe('BookingsService', () => {
       expect(ridesService.releaseSeats).toHaveBeenCalledWith(RIDE_ID, 2);
       expect(trustScoreUpdater.recalculate).toHaveBeenCalledWith('passenger-1');
       expect(result.status).toBe(BookingStatus.CANCELLED);
+      expect(notifier.cancelled).toHaveBeenCalledWith(
+        expect.anything(),
+        'passenger-1',
+      );
     });
 
     it('does not touch seats when a pending request is cancelled', async () => {
@@ -244,6 +265,7 @@ describe('BookingsService', () => {
       expect(ridesService.releaseSeats).not.toHaveBeenCalled();
       // withdrawing an unanswered request doesn't affect Trust Score
       expect(trustScoreUpdater.recalculate).not.toHaveBeenCalled();
+      expect(notifier.cancelled).not.toHaveBeenCalled();
     });
 
     it('refuses a booking that is already closed', async () => {

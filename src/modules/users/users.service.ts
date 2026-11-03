@@ -113,6 +113,24 @@ export class UsersService {
       .exec();
   }
 
+  // null on logout, so a logged-out phone stops getting notifications
+  async setPushToken(userId: string, pushToken: string | null): Promise<void> {
+    await this.userModel.updateOne({ _id: userId }, { pushToken }).exec();
+  }
+
+  // id -> push token, only for users who have one
+  async findPushTokens(ids: string[]): Promise<Map<string, string>> {
+    const users = await this.userModel
+      .find({ _id: { $in: ids } })
+      .select('+pushToken')
+      .exec();
+    const tokens = new Map<string, string>();
+    for (const user of users) {
+      if (user.pushToken) tokens.set(user.id, user.pushToken);
+    }
+    return tokens;
+  }
+
   async setPasswordResetToken(
     userId: string,
     tokenHash: string,

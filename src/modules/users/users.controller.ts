@@ -28,6 +28,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { SelfOrAdminGuard } from '../../common/guards/self-or-admin.guard';
 import { SubmitVerificationDto } from './dto/submit-verification.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { UpdatePushTokenDto } from './dto/update-push-token.dto';
 import { UpdateTravelProfileDto } from './dto/update-travel-profile.dto';
 import { UsersService } from './users.service';
 
@@ -52,6 +53,19 @@ export class UsersController {
     @Body() dto: UpdateProfileDto,
   ) {
     return this.usersService.updateProfile(user.userId, dto);
+  }
+
+  @ApiOperation({
+    summary: "Save this phone's Expo push token (Android notifications)",
+  })
+  @UseGuards(JwtAuthGuard)
+  @Patch('me/push-token')
+  async updatePushToken(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: UpdatePushTokenDto,
+  ) {
+    await this.usersService.setPushToken(user.userId, dto.token);
+    return { message: 'Push token saved.' };
   }
 
   @ApiOperation({

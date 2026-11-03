@@ -67,6 +67,43 @@ describe('UsersService', () => {
     usersService = module.get(UsersService);
   });
 
+  describe('push tokens', () => {
+    it('saves and clears the push token', async () => {
+      userModel.updateOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue({}),
+      });
+
+      await usersService.setPushToken('user-1', 'ExponentPushToken[abc]');
+      await usersService.setPushToken('user-1', null);
+
+      expect(userModel.updateOne).toHaveBeenNthCalledWith(
+        1,
+        { _id: 'user-1' },
+        { pushToken: 'ExponentPushToken[abc]' },
+      );
+      expect(userModel.updateOne).toHaveBeenNthCalledWith(
+        2,
+        { _id: 'user-1' },
+        { pushToken: null },
+      );
+    });
+
+    it('only maps users who have a token', async () => {
+      userModel.find.mockReturnValue({
+        select: () => ({
+          exec: jest.fn().mockResolvedValue([
+            { id: 'user-1', pushToken: 'ExponentPushToken[abc]' },
+            { id: 'user-2', pushToken: null },
+          ]),
+        }),
+      });
+
+      const tokens = await usersService.findPushTokens(['user-1', 'user-2']);
+
+      expect([...tokens]).toEqual([['user-1', 'ExponentPushToken[abc]']]);
+    });
+  });
+
   describe('findMe', () => {
     it('returns the current profile without sensitive fields', async () => {
       const execMock = jest.fn().mockResolvedValue({

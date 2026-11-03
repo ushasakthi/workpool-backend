@@ -131,6 +131,7 @@ export class AuthService {
 
   async logout(userId: string): Promise<void> {
     await this.usersService.setRefreshTokenHash(userId, null);
+    await this.usersService.setPushToken(userId, null);
   }
 
   async forgotPassword(email: string): Promise<void> {

@@ -22,6 +22,7 @@ import {
   SavingsTrip,
 } from './savings/savings';
 import { BookingParties, findBookingParties } from './guards/booking-parties';
+import { BookingNotifier } from './notifications/booking-notifier';
 import { Review, ReviewDocument } from '../reviews/schemas/review.schema';
 import { Booking, BookingDocument } from './schemas/booking.schema';
 import {
@@ -55,6 +56,7 @@ export class BookingsService {
     private readonly ridesService: RidesService,
     private readonly usersService: UsersService,
     private readonly trustScoreUpdater: TrustScoreUpdater,
+    private readonly notifier: BookingNotifier,
   ) {}
 
   async request(
@@ -94,6 +96,7 @@ export class BookingsService {
       status: BookingStatus.REQUESTED,
       requestedAt: new Date(),
     }).save();
+    await this.notifier.requested(booking);
     return serializeBooking(booking);
   }
 
@@ -128,6 +131,7 @@ export class BookingsService {
       throw new ConflictException('Not enough seats left on this ride');
     }
 
+    await this.notifier.answered(booking, true);
     return serializeBooking(booking);
   }
 
@@ -142,6 +146,7 @@ export class BookingsService {
     if (!booking) {
       throw new ConflictException('Only pending requests can be rejected');
     }
+    await this.notifier.answered(booking, false);
     return serializeBooking(booking);
   }
 
@@ -167,6 +172,8 @@ export class BookingsService {
       );
       // backing out of an accepted booking lowers the canceller's Trust Score
       await this.trustScoreUpdater.recalculate(cancelledBy);
+      // withdrawing an unanswered request doesn't email anyone, this does
+      await this.notifier.cancelled(booking, cancelledBy);
     }
 
     booking.status = BookingStatus.CANCELLED;

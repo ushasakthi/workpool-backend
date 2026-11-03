@@ -100,6 +100,10 @@ export class User {
   @Prop({ select: false })
   refreshTokenHash?: string;
 
+  // Expo push token of the phone the user last logged in on (Android only)
+  @Prop({ type: String, select: false })
+  pushToken?: string | null;
+
   @Prop({ select: false })
   passwordResetTokenHash?: string;
 
