@@ -8,15 +8,8 @@ import {
 import { UserDocument } from '../schemas/user.schema';
 import { GeoPoint } from '../schemas/travel-profile.schema';
 
-// Privacy transform for User.travelProfile.
-//
-// Exact home/work coordinates never leave the server for anyone but the profile
-// owner — they stay server-side for the Smart Matching Score (Sprint 4). Other
-// users get a point fuzzed by 300–500 m.
-//
-// The fuzz is DETERMINISTIC per (userId, kind): every request returns the same
-// approximate point, so an observer can't average many responses back to the
-// true location.
+// Only the owner sees exact home/work locations. Others get a point moved
+// 300-500 m. The offset is always the same for a user, so it can't be averaged out.
 const MIN_JITTER_METRES = 300;
 const MAX_JITTER_METRES = 500;
 const METRES_PER_DEGREE_LAT = 111_320;
@@ -35,8 +28,18 @@ export interface TravelProfileView {
   workEndTime?: string;
   daysAvailable: Weekday[];
   preferredRole?: PreferredRole;
-  // true when the coordinates above have been fuzzed for privacy (non-owner view).
+  // true if the coordinates are fuzzed
   approximate: boolean;
+}
+
+// the public part of the Trust Score: cancellation and complaint counts stay
+// private, because complaints come from confidential reports
+export interface TrustScoreView {
+  // 0-100, null until calculated
+  score: number | null;
+  completedRides: number;
+  ratingCount: number;
+  averageRating: number;
 }
 
 export interface PublicUserProfile {
@@ -48,6 +51,7 @@ export interface PublicUserProfile {
     identityStatus: VerificationStatus;
     workplaceStatus: VerificationStatus;
   };
+  trustScore: TrustScoreView;
   travelProfile?: TravelProfileView;
 }
 
@@ -60,10 +64,10 @@ export interface OwnUserProfile {
   photoUrl?: string;
   linkedinUrl?: string;
   verification: UserDocument['verification'];
+  trustScore: TrustScoreView;
   travelProfile?: TravelProfileView;
 }
 
-// Single entry point: applies the jitter only when the requester isn't the owner.
 export function serializeUserProfile(
   user: UserDocument,
   requesterId: string,
@@ -83,6 +87,7 @@ export function serializeOwnProfile(user: UserDocument): OwnUserProfile {
     photoUrl: photoUrl(user),
     linkedinUrl: user.linkedinUrl,
     verification: user.verification,
+    trustScore: serializeTrustScore(user),
     travelProfile: serializeTravelProfile(user, true),
   };
 }
@@ -97,12 +102,22 @@ export function serializePublicProfile(user: UserDocument): PublicUserProfile {
       identityStatus: user.verification.identityStatus,
       workplaceStatus: user.verification.workplaceStatus,
     },
+    trustScore: serializeTrustScore(user),
     travelProfile: serializeTravelProfile(user, false),
   };
 }
 
-// The stored value is a local filename — expose it only as the authenticated fetch
-// route, with a version tag so the client re-fetches after the photo is replaced.
+function serializeTrustScore(user: UserDocument): TrustScoreView {
+  const trust = user.trustScore;
+  return {
+    score: trust?.score ?? null,
+    completedRides: trust?.completedRides ?? 0,
+    ratingCount: trust?.ratingCount ?? 0,
+    averageRating: trust?.averageRating ?? 0,
+  };
+}
+
+// return the photo route, not the filename. ?v= makes the app reload a new photo
 function photoUrl(user: UserDocument): string | undefined {
   if (!user.photoUrl) {
     return undefined;
@@ -145,8 +160,7 @@ function serializeTravelProfile(
     workLocation: profile.workLocation
       ? {
           ...approximatePoint(profile.workLocation, `${user.id}:work`),
-          // Workplace name is public professional info by default; the user can
-          // opt to hide it. Home address labels are never shared.
+          // workplace name can be hidden, home label is never shared
           label: profile.hideWorkplaceName
             ? undefined
             : profile.workLocation.label,
