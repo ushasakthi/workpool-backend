@@ -5,12 +5,13 @@ import { RidesService } from '../../rides/rides.service';
 import { BookingDocument } from '../schemas/booking.schema';
 
 export interface BookingParties {
+  rideId: string;
   status: BookingStatus;
   passengerId: string;
   driverId: string;
 }
 
-// who is on each side of a booking, used by the booking guards, reviews and reports
+// who is on each side of a booking, used by the booking guards, reviews, reports and SOS
 export async function findBookingParties(
   bookingId: string | undefined,
   bookingModel: Model<BookingDocument>,
@@ -30,6 +31,7 @@ export async function findBookingParties(
 
   const ride = await ridesService.getRideOrThrow(String(booking.rideId));
   return {
+    rideId: String(booking.rideId),
     status: booking.status,
     passengerId: String(booking.passengerId),
     driverId: String(ride.driverId),

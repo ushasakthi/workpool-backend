@@ -27,6 +27,7 @@ import {
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { SelfOrAdminGuard } from '../../common/guards/self-or-admin.guard';
 import { SubmitVerificationDto } from './dto/submit-verification.dto';
+import { UpdateEmergencyContactDto } from './dto/update-emergency-contact.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdatePushTokenDto } from './dto/update-push-token.dto';
 import { UpdateTravelProfileDto } from './dto/update-travel-profile.dto';
@@ -53,6 +54,16 @@ export class UsersController {
     @Body() dto: UpdateProfileDto,
   ) {
     return this.usersService.updateProfile(user.userId, dto);
+  }
+
+  @ApiOperation({ summary: 'Set who to alert when pressing SOS (FR17)' })
+  @UseGuards(JwtAuthGuard)
+  @Patch('me/emergency-contact')
+  updateEmergencyContact(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: UpdateEmergencyContactDto,
+  ) {
+    return this.usersService.updateEmergencyContact(user.userId, dto);
   }
 
   @ApiOperation({

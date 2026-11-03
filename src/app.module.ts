@@ -13,6 +13,7 @@ import { RidesModule } from './modules/rides/rides.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { SosModule } from './modules/sos/sos.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { ReportsModule } from './modules/reports/reports.module';
     BookingsModule,
     ReviewsModule,
     ReportsModule,
+    SosModule,
   ],
 })
 export class AppModule {}

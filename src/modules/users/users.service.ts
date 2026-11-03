@@ -224,6 +224,27 @@ export class UsersService {
     return this.applyUserUpdate(userId, buildUpdateSet(input));
   }
 
+  async updateEmergencyContact(
+    userId: string,
+    contact: { name: string; phone: string },
+  ): Promise<OwnUserProfile> {
+    return this.applyUserUpdate(userId, {
+      emergencyContact: { name: contact.name.trim(), phone: contact.phone },
+    });
+  }
+
+  // for building an SOS message, undefined if the user hasn't added one
+  async findEmergencyContact(
+    userId: string,
+  ): Promise<{ name: string; phone: string } | undefined> {
+    const user = await this.userModel
+      .findById(userId)
+      .select('emergencyContact')
+      .exec();
+    const contact = user?.emergencyContact;
+    return contact ? { name: contact.name, phone: contact.phone } : undefined;
+  }
+
   async updateTravelProfile(
     userId: string,
     input: UpdateTravelProfileInput,

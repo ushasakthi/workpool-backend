@@ -66,6 +66,8 @@ export interface OwnUserProfile {
   verification: UserDocument['verification'];
   trustScore: TrustScoreView;
   travelProfile?: TravelProfileView;
+  // own profile only, never in the public one
+  emergencyContact?: { name: string; phone: string };
 }
 
 export function serializeUserProfile(
@@ -89,6 +91,9 @@ export function serializeOwnProfile(user: UserDocument): OwnUserProfile {
     verification: user.verification,
     trustScore: serializeTrustScore(user),
     travelProfile: serializeTravelProfile(user, true),
+    emergencyContact: user.emergencyContact
+      ? { name: user.emergencyContact.name, phone: user.emergencyContact.phone }
+      : undefined,
   };
 }
 

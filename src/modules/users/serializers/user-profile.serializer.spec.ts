@@ -107,6 +107,20 @@ describe('user-profile.serializer', () => {
       expect(result.name).toBe('Nadeesha Perera');
     });
 
+    it('never shows the emergency contact to other users', () => {
+      const user = makeUser({
+        emergencyContact: { name: 'Amali Perera', phone: '+94771234567' },
+      });
+
+      expect(serializePublicProfile(user)).not.toHaveProperty(
+        'emergencyContact',
+      );
+      expect(serializeOwnProfile(user).emergencyContact).toEqual({
+        name: 'Amali Perera',
+        phone: '+94771234567',
+      });
+    });
+
     it('narrows verification to the two public statuses', () => {
       const result = serializePublicProfile(makeUser());
       expect(result.verification).toEqual({

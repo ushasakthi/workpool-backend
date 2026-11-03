@@ -35,6 +35,19 @@ export class Verification {
 
 export const VerificationSchema = SchemaFactory.createForClass(Verification);
 
+// who to alert when the user presses SOS during a ride
+@Schema({ _id: false })
+export class EmergencyContact {
+  @Prop({ required: true, trim: true })
+  name!: string;
+
+  @Prop({ required: true, trim: true })
+  phone!: string;
+}
+
+export const EmergencyContactSchema =
+  SchemaFactory.createForClass(EmergencyContact);
+
 export type UserDocument = HydratedDocument<User>;
 
 @Schema({ timestamps: true })
@@ -79,6 +92,10 @@ export class User {
 
   @Prop({ type: TrustScoreSchema, default: () => ({}) })
   trustScore!: TrustScore;
+
+  // embedded: one per user, always read with the user. Only the user sees it
+  @Prop({ type: EmergencyContactSchema })
+  emergencyContact?: EmergencyContact;
 
   // proof of agreeing to the Terms (cost-sharing, not a hire service)
   @Prop()
