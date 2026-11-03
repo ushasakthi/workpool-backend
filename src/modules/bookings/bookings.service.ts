@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
 } from '@nestjs/common';
+import { randomInt } from 'crypto';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { BookingStatus, RideStatus } from '../../common/constants';
@@ -45,6 +46,11 @@ export interface CreateBookingInput {
 
 // bookings that still hold (or are waiting for) a seat
 const OPEN_STATUSES = [BookingStatus.REQUESTED, BookingStatus.ACCEPTED];
+
+// "0000"-"9999", crypto so it can't be guessed from earlier PINs
+export function generatePickupPin(): string {
+  return String(randomInt(0, 10000)).padStart(4, '0');
+}
 
 @Injectable()
 export class BookingsService {
@@ -105,7 +111,13 @@ export class BookingsService {
     const booking = await this.bookingModel
       .findOneAndUpdate(
         { _id: id, status: BookingStatus.REQUESTED },
-        { $set: { status: BookingStatus.ACCEPTED, respondedAt: new Date() } },
+        {
+          $set: {
+            status: BookingStatus.ACCEPTED,
+            respondedAt: new Date(),
+            pickupPin: generatePickupPin(),
+          },
+        },
         { returnDocument: 'after' },
       )
       .exec();
@@ -124,7 +136,7 @@ export class BookingsService {
           { _id: id },
           {
             $set: { status: BookingStatus.REQUESTED },
-            $unset: { respondedAt: 1 },
+            $unset: { respondedAt: 1, pickupPin: 1 },
           },
         )
         .exec();
@@ -180,16 +192,57 @@ export class BookingsService {
     return serializeBooking(booking);
   }
 
+  // the driver types the PIN the passenger shows them at pickup (FR13)
+  async verifyPickup(id: string, pin: string): Promise<BookingView> {
+    // one conditional update, so the PIN check and the save can't be split
+    const booking = await this.bookingModel
+      .findOneAndUpdate(
+        {
+          _id: id,
+          status: BookingStatus.ACCEPTED,
+          pickupPin: pin,
+          pickupVerifiedAt: { $exists: false },
+        },
+        { $set: { pickupVerifiedAt: new Date() } },
+        { returnDocument: 'after' },
+      )
+      .exec();
+    if (booking) {
+      return serializeBooking(booking);
+    }
+
+    // nothing matched: wrong PIN, or a booking that isn't waiting for pickup
+    const waiting = await this.bookingModel
+      .exists({
+        _id: id,
+        status: BookingStatus.ACCEPTED,
+        pickupVerifiedAt: { $exists: false },
+      })
+      .exec();
+    if (waiting) {
+      throw new BadRequestException('Incorrect PIN');
+    }
+    throw new ConflictException(
+      'Only accepted bookings waiting for pickup can be verified',
+    );
+  }
+
   async complete(id: string): Promise<BookingView> {
     const booking = await this.bookingModel
       .findOneAndUpdate(
-        { _id: id, status: BookingStatus.ACCEPTED },
+        {
+          _id: id,
+          status: BookingStatus.ACCEPTED,
+          pickupVerifiedAt: { $exists: true },
+        },
         { $set: { status: BookingStatus.COMPLETED, completedAt: new Date() } },
         { returnDocument: 'after' },
       )
       .exec();
     if (!booking) {
-      throw new ConflictException('Only accepted bookings can be completed');
+      throw new ConflictException(
+        'Only accepted bookings with a verified pickup can be completed',
+      );
     }
 
     // rides repeat every week, so the seat is free for the next booking
@@ -263,8 +316,11 @@ export class BookingsService {
       filter.status = status;
     }
 
+    // the PIN is only loaded for the passenger, the driver must never see it
+    const projection =
+      side === BookingSide.PASSENGER ? '+pickupPin' : undefined;
     const bookings = await this.bookingModel
-      .find(filter)
+      .find(filter, projection)
       .sort({ requestedAt: -1 })
       .exec();
 
@@ -289,9 +345,15 @@ export class BookingsService {
       userId,
     );
     const rideView = serializeRide(ride);
+    const waitingForPickup =
+      booking.status === BookingStatus.ACCEPTED && !booking.pickupVerifiedAt;
 
     return {
       ...serializeBooking(booking),
+      pickupPin:
+        side === BookingSide.PASSENGER && waitingForPickup
+          ? booking.pickupPin
+          : undefined,
       ride: {
         origin: rideView.origin,
         destination: rideView.destination,

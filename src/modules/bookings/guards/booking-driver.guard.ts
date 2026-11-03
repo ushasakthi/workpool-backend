@@ -11,7 +11,7 @@ import { RidesService } from '../../rides/rides.service';
 import { Booking, BookingDocument } from '../schemas/booking.schema';
 import { findBookingParties } from './booking-parties';
 
-// only the driver of the booked ride can accept, reject or complete it
+// only the driver of the booked ride can accept, reject, verify pickup or complete it
 @Injectable()
 export class BookingDriverGuard implements CanActivate {
   constructor(

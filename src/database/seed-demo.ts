@@ -719,7 +719,10 @@ async function seedDemo(): Promise<void> {
           ...(answered && {
             respondedAt: new Date(requestedAt.getTime() + DAY_MS / 4),
           }),
+          // a known PIN so the pickup check can be demoed without the passenger's phone
+          ...(b.status === BookingStatus.ACCEPTED && { pickupPin: '1234' }),
           ...(b.completed !== undefined && {
+            pickupVerifiedAt: daysAgo(b.completed),
             completedAt: daysAgo(b.completed),
           }),
           ...(b.cancelledBy && { cancelledBy: uid(b.cancelledBy) }),

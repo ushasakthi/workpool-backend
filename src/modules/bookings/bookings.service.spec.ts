@@ -5,7 +5,7 @@ import { BookingStatus, RideStatus } from '../../common/constants';
 import { RidesService } from '../rides/rides.service';
 import { TrustScoreUpdater } from '../trust-score/trust-score.updater';
 import { UsersService } from '../users/users.service';
-import { BookingsService } from './bookings.service';
+import { BookingsService, generatePickupPin } from './bookings.service';
 import { BookingSide } from './dto/list-my-bookings-query.dto';
 import { BookingNotifier } from './notifications/booking-notifier';
 import { Review } from '../reviews/schemas/review.schema';
@@ -172,13 +172,15 @@ describe('BookingsService', () => {
 
       const result = await service.accept('booking-1');
 
-      const [filter] = bookingModel.findOneAndUpdate.mock.calls[0] as [
+      const [filter, update] = bookingModel.findOneAndUpdate.mock.calls[0] as [
         Record<string, unknown>,
+        { $set: Record<string, unknown> },
       ];
       expect(filter).toEqual({
         _id: 'booking-1',
         status: BookingStatus.REQUESTED,
       });
+      expect(update.$set.pickupPin).toMatch(/^\d{4}$/);
       expect(ridesService.reserveSeats).toHaveBeenCalledWith(RIDE_ID, 2);
       expect(result.status).toBe(BookingStatus.ACCEPTED);
       expect(notifier.answered).toHaveBeenCalledWith(expect.anything(), true);
@@ -208,7 +210,7 @@ describe('BookingsService', () => {
         { _id: 'booking-1' },
         {
           $set: { status: BookingStatus.REQUESTED },
-          $unset: { respondedAt: 1 },
+          $unset: { respondedAt: 1, pickupPin: 1 },
         },
       );
     });
@@ -277,6 +279,57 @@ describe('BookingsService', () => {
     });
   });
 
+  describe('generatePickupPin', () => {
+    it('is always 4 digits, zeros included', () => {
+      for (let i = 0; i < 200; i++) {
+        expect(generatePickupPin()).toMatch(/^\d{4}$/);
+      }
+    });
+  });
+
+  describe('verifyPickup', () => {
+    it('records the pickup when the PIN is right', async () => {
+      bookingModel.findOneAndUpdate.mockReturnValue(
+        query(
+          bookingDoc({
+            status: BookingStatus.ACCEPTED,
+            pickupVerifiedAt: new Date(),
+          }),
+        ),
+      );
+
+      const result = await service.verifyPickup('booking-1', '4821');
+
+      const [filter] = bookingModel.findOneAndUpdate.mock.calls[0] as [
+        Record<string, unknown>,
+      ];
+      expect(filter).toMatchObject({
+        _id: 'booking-1',
+        status: BookingStatus.ACCEPTED,
+        pickupPin: '4821',
+      });
+      expect(result.pickupVerifiedAt).toBeInstanceOf(Date);
+    });
+
+    it('says "Incorrect PIN" when the booking is waiting but the PIN is wrong', async () => {
+      bookingModel.findOneAndUpdate.mockReturnValue(query(null));
+      bookingModel.exists.mockReturnValue(query({ _id: 'booking-1' }));
+
+      await expect(service.verifyPickup('booking-1', '0000')).rejects.toThrow(
+        'Incorrect PIN',
+      );
+    });
+
+    it('refuses a booking that is not waiting for pickup', async () => {
+      bookingModel.findOneAndUpdate.mockReturnValue(query(null));
+      bookingModel.exists.mockReturnValue(query(null));
+
+      await expect(service.verifyPickup('booking-1', '4821')).rejects.toThrow(
+        ConflictException,
+      );
+    });
+  });
+
   describe('complete', () => {
     it('completes an accepted booking and frees the seats', async () => {
       bookingModel.findOneAndUpdate.mockReturnValue(
@@ -284,6 +337,12 @@ describe('BookingsService', () => {
       );
 
       const result = await service.complete('booking-1');
+
+      const [filter] = bookingModel.findOneAndUpdate.mock.calls[0] as [
+        Record<string, unknown>,
+      ];
+      // can't complete a ride the passenger was never picked up for
+      expect(filter).toMatchObject({ pickupVerifiedAt: { $exists: true } });
 
       expect(ridesService.releaseSeats).toHaveBeenCalledWith(RIDE_ID, 2);
       expect(trustScoreUpdater.recalculate).toHaveBeenCalledWith('passenger-1');
@@ -319,9 +378,10 @@ describe('BookingsService', () => {
         BookingSide.PASSENGER,
       );
 
-      expect(bookingModel.find).toHaveBeenCalledWith({
-        passengerId: 'passenger-1',
-      });
+      expect(bookingModel.find).toHaveBeenCalledWith(
+        { passengerId: 'passenger-1' },
+        '+pickupPin',
+      );
       expect(usersService.getPublicProfile).toHaveBeenCalledWith(
         'driver-1',
         'passenger-1',
@@ -369,11 +429,60 @@ describe('BookingsService', () => {
         BookingStatus.REQUESTED,
       );
 
-      expect(bookingModel.find).toHaveBeenCalledWith({
-        rideId: { $in: [RIDE_ID] },
-        status: BookingStatus.REQUESTED,
-      });
+      // no '+pickupPin': the driver's list never loads the PIN
+      expect(bookingModel.find).toHaveBeenCalledWith(
+        { rideId: { $in: [RIDE_ID] }, status: BookingStatus.REQUESTED },
+        undefined,
+      );
       expect(result[0].otherParty.name).toBe('Ushaa');
+    });
+
+    describe('pickup PIN', () => {
+      const accepted = (overrides: Record<string, unknown> = {}) =>
+        bookingDoc({
+          status: BookingStatus.ACCEPTED,
+          pickupPin: '4821',
+          ...overrides,
+        });
+
+      beforeEach(() => {
+        ridesService.findRideIdsByDriver.mockResolvedValue([RIDE_ID]);
+        usersService.getPublicProfile.mockResolvedValue({
+          id: 'other',
+          name: 'Other',
+          trustScore: { score: 70 },
+        });
+      });
+
+      it('shows the passenger their PIN while waiting for pickup', async () => {
+        mockFind([accepted()]);
+
+        const [item] = await service.listMine(
+          'passenger-1',
+          BookingSide.PASSENGER,
+        );
+
+        expect(item.pickupPin).toBe('4821');
+      });
+
+      it('hides it once the pickup is verified', async () => {
+        mockFind([accepted({ pickupVerifiedAt: new Date() })]);
+
+        const [item] = await service.listMine(
+          'passenger-1',
+          BookingSide.PASSENGER,
+        );
+
+        expect(item.pickupPin).toBeUndefined();
+      });
+
+      it('never gives it to the driver', async () => {
+        mockFind([accepted()]);
+
+        const [item] = await service.listMine('driver-1', BookingSide.DRIVER);
+
+        expect(item.pickupPin).toBeUndefined();
+      });
     });
   });
 

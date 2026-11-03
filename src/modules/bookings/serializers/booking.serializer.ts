@@ -10,10 +10,13 @@ export interface BookingView {
   seatsRequested: number;
   requestedAt: Date;
   respondedAt?: Date;
+  pickupVerifiedAt?: Date;
 }
 
 // a booking in a list, with enough of the ride and the other person to show a card
 export interface BookingListItem extends BookingView {
+  // passenger side only, while the booking is accepted and not picked up yet
+  pickupPin?: string;
   ride: {
     origin: GeoPointView;
     destination: GeoPointView;
@@ -45,5 +48,6 @@ export function serializeBooking(booking: BookingDocument): BookingView {
     seatsRequested: booking.seatsRequested,
     requestedAt: booking.requestedAt,
     respondedAt: booking.respondedAt,
+    pickupVerifiedAt: booking.pickupVerifiedAt,
   };
 }

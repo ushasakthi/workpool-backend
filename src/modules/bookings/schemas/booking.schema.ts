@@ -43,6 +43,14 @@ export class Booking {
   @Prop()
   respondedAt?: Date;
 
+  // 4 digits made on accept; only the passenger is ever sent it
+  @Prop({ select: false })
+  pickupPin?: string;
+
+  // when the driver typed the right PIN at pickup
+  @Prop()
+  pickupVerifiedAt?: Date;
+
   // when the driver marked it completed (for "completed this month")
   @Prop()
   completedAt?: Date;

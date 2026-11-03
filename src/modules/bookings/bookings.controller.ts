@@ -21,6 +21,7 @@ import { BookingsService } from './bookings.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { ListMyBookingsQueryDto } from './dto/list-my-bookings-query.dto';
 import { SavingsQueryDto } from './dto/savings-query.dto';
+import { VerifyPickupDto } from './dto/verify-pickup.dto';
 import { BookingDriverGuard } from './guards/booking-driver.guard';
 import { BookingParticipantGuard } from './guards/booking-participant.guard';
 
@@ -88,7 +89,19 @@ export class BookingsController {
     return this.bookingsService.cancel(id, user.userId);
   }
 
-  @ApiOperation({ summary: 'Mark an accepted booking completed (driver only)' })
+  @ApiOperation({
+    summary: "Check the passenger's pickup PIN (driver only, FR13)",
+  })
+  @UseGuards(JwtAuthGuard, BookingDriverGuard)
+  @Patch(':id/verify-pickup')
+  verifyPickup(@Param('id') id: string, @Body() dto: VerifyPickupDto) {
+    return this.bookingsService.verifyPickup(id, dto.pin);
+  }
+
+  @ApiOperation({
+    summary:
+      'Mark an accepted, pickup-verified booking completed (driver only)',
+  })
   @UseGuards(JwtAuthGuard, BookingDriverGuard)
   @Patch(':id/complete')
   complete(@Param('id') id: string) {
