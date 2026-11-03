@@ -9,6 +9,7 @@ import { isValidObjectId, Model } from 'mongoose';
 import {
   AdminAction,
   ReportCategory,
+  ReportSeverity,
   ReportStatus,
 } from '../../common/constants';
 import { AdminLogService } from '../admin-log/admin-log.service';
@@ -149,17 +150,21 @@ export class ReportsService {
     id: string,
     adminId: string,
     status: ReportStatus.REVIEWED | ReportStatus.DISMISSED,
+    severity?: ReportSeverity,
   ): Promise<{ id: string; status: ReportStatus }> {
     if (!isValidObjectId(id)) {
       throw new NotFoundException('Report not found');
     }
 
+    const resolved = { status, resolvedBy: adminId, resolvedAt: new Date() };
+    // severity only means something on an upheld report
+    const update =
+      status === ReportStatus.REVIEWED
+        ? { $set: { ...resolved, severity } }
+        : { $set: resolved, $unset: { severity: 1 } };
+
     const report = await this.reportModel
-      .findByIdAndUpdate(
-        id,
-        { $set: { status, resolvedBy: adminId, resolvedAt: new Date() } },
-        { returnDocument: 'after' },
-      )
+      .findByIdAndUpdate(id, update, { returnDocument: 'after' })
       .exec();
     if (!report) {
       throw new NotFoundException('Report not found');
@@ -173,6 +178,8 @@ export class ReportsService {
           : AdminAction.REPORT_DISMISSED,
       targetUserId: String(report.reportedUser),
       reportId: id,
+      note:
+        status === ReportStatus.REVIEWED ? `Severity: ${severity}` : undefined,
     });
 
     // a dismissed report stops counting as a complaint

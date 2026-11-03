@@ -16,6 +16,7 @@ export class TrustScore {
   @Prop({ default: 0 })
   cancellationCount!: number;
 
+  // weighted by severity (low 1, medium 2, high 3), not a plain count
   @Prop({ default: 0 })
   complaintCount!: number;
 

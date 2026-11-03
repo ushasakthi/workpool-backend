@@ -9,6 +9,7 @@ import {
   AdminAction,
   BookingStatus,
   ReportCategory,
+  ReportSeverity,
   ReportStatus,
 } from '../../common/constants';
 import { BookingsService } from '../bookings/bookings.service';
@@ -147,6 +148,56 @@ describe('ReportsService', () => {
         reportId: REPORT_ID,
       });
       expect(result.status).toBe(ReportStatus.DISMISSED);
+    });
+
+    it('saves the severity of an upheld report and logs it', async () => {
+      reportModel.findByIdAndUpdate.mockReturnValue(
+        query({
+          id: REPORT_ID,
+          reportedUser: 'driver-1',
+          status: ReportStatus.REVIEWED,
+        }),
+      );
+
+      await service.resolve(
+        REPORT_ID,
+        'admin-1',
+        ReportStatus.REVIEWED,
+        ReportSeverity.HIGH,
+      );
+
+      const [, update] = reportModel.findByIdAndUpdate.mock.calls[0] as [
+        string,
+        { $set: Record<string, unknown> },
+      ];
+      expect(update.$set).toMatchObject({
+        status: ReportStatus.REVIEWED,
+        severity: ReportSeverity.HIGH,
+      });
+      expect(adminLogService.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: AdminAction.REPORT_REVIEWED,
+          note: 'Severity: high',
+        }),
+      );
+    });
+
+    it('clears any severity when a report is dismissed', async () => {
+      reportModel.findByIdAndUpdate.mockReturnValue(
+        query({
+          id: REPORT_ID,
+          reportedUser: 'driver-1',
+          status: ReportStatus.DISMISSED,
+        }),
+      );
+
+      await service.resolve(REPORT_ID, 'admin-1', ReportStatus.DISMISSED);
+
+      const [, update] = reportModel.findByIdAndUpdate.mock.calls[0] as [
+        string,
+        { $unset: Record<string, unknown> },
+      ];
+      expect(update.$unset).toEqual({ severity: 1 });
     });
 
     it('404s on a malformed or unknown id', async () => {

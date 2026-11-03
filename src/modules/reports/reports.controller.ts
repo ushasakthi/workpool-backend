@@ -59,6 +59,11 @@ export class AdminReportsController {
     @CurrentUser() admin: AuthenticatedUser,
     @Body() dto: ResolveReportDto,
   ) {
-    return this.reportsService.resolve(id, admin.userId, dto.status);
+    return this.reportsService.resolve(
+      id,
+      admin.userId,
+      dto.status,
+      dto.severity,
+    );
   }
 }

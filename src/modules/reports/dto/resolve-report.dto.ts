@@ -1,6 +1,6 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsIn } from 'class-validator';
-import { ReportStatus } from '../../../common/constants';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsEnum, IsIn, ValidateIf } from 'class-validator';
+import { ReportSeverity, ReportStatus } from '../../../common/constants';
 
 export class ResolveReportDto {
   @ApiProperty({
@@ -10,4 +10,13 @@ export class ResolveReportDto {
   })
   @IsIn([ReportStatus.REVIEWED, ReportStatus.DISMISSED])
   status!: ReportStatus.REVIEWED | ReportStatus.DISMISSED;
+
+  @ApiPropertyOptional({
+    enum: ReportSeverity,
+    description:
+      'Required when status is "reviewed" (weighs the Trust Score penalty), ignored when "dismissed"',
+  })
+  @ValidateIf((dto: ResolveReportDto) => dto.status === ReportStatus.REVIEWED)
+  @IsEnum(ReportSeverity)
+  severity?: ReportSeverity;
 }

@@ -1,6 +1,8 @@
+import { ReportSeverity, ReportStatus } from '../../common/constants';
 import {
   cancellationPenalty,
   complaintPenalty,
+  complaintWeight,
   completedRidesScore,
   ratingScore,
   TrustInputs,
@@ -79,6 +81,30 @@ describe('complaintPenalty', () => {
   });
 });
 
+describe('complaintWeight', () => {
+  it('weighs an upheld report by its severity', () => {
+    expect(complaintWeight(ReportStatus.REVIEWED, ReportSeverity.LOW)).toBe(1);
+    expect(complaintWeight(ReportStatus.REVIEWED, ReportSeverity.MEDIUM)).toBe(
+      2,
+    );
+    expect(complaintWeight(ReportStatus.REVIEWED, ReportSeverity.HIGH)).toBe(3);
+  });
+
+  it('counts an open report at the lowest weight', () => {
+    expect(complaintWeight(ReportStatus.OPEN)).toBe(1);
+  });
+
+  it('ignores a dismissed report, whatever its severity', () => {
+    expect(complaintWeight(ReportStatus.DISMISSED, ReportSeverity.HIGH)).toBe(
+      0,
+    );
+  });
+
+  it('counts an old reviewed report with no severity as 1', () => {
+    expect(complaintWeight(ReportStatus.REVIEWED)).toBe(1);
+  });
+});
+
 describe('TrustScoreService.calculate', () => {
   const service = new TrustScoreService();
 
@@ -133,6 +159,13 @@ describe('TrustScoreService.calculate', () => {
 
     expect(result.score).toBe(62);
     expect(result.breakdown.complaints).toBe(25);
+  });
+
+  it('takes 15 points for one high-severity complaint (70)', () => {
+    const result = service.calculate({ ...EXAMPLE, complaintCount: 3 });
+
+    expect(result.score).toBe(70);
+    expect(result.breakdown.complaints).toBe(15);
   });
 
   it('never goes below 0', () => {

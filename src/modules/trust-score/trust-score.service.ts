@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ReportSeverity, ReportStatus } from '../../common/constants';
 
 // see docs/trust-score-formula.md before changing any of these
 const POINTS = {
@@ -14,6 +15,11 @@ const NO_RATINGS_SCORE = 0.5;
 // one early cancellation shouldn't sink a brand-new user
 const MIN_CANCELLATION_BASE = 5;
 const COMPLAINTS_FOR_FULL_PENALTY = 5;
+const SEVERITY_WEIGHTS = {
+  [ReportSeverity.LOW]: 1,
+  [ReportSeverity.MEDIUM]: 2,
+  [ReportSeverity.HIGH]: 3,
+};
 
 export interface TrustInputs {
   identityVerified: boolean;
@@ -23,6 +29,7 @@ export interface TrustInputs {
   // 1-5, ignored when ratingCount is 0
   averageRating: number;
   cancellationCount: number;
+  // weighted by severity, see complaintWeight
   complaintCount: number;
 }
 
@@ -64,6 +71,17 @@ export function cancellationPenalty(
   if (cancellations <= 0) return 0;
   const base = Math.max(cancellations + completedRides, MIN_CANCELLATION_BASE);
   return cancellations / base;
+}
+
+// open reports count at the lowest weight until an admin decides; reviewed
+// reports from before severity existed also count as 1
+export function complaintWeight(
+  status: ReportStatus,
+  severity?: ReportSeverity,
+): number {
+  if (status === ReportStatus.DISMISSED) return 0;
+  if (status === ReportStatus.OPEN || !severity) return 1;
+  return SEVERITY_WEIGHTS[severity];
 }
 
 export function complaintPenalty(complaints: number): number {

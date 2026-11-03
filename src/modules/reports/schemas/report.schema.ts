@@ -1,6 +1,10 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
-import { ReportCategory, ReportStatus } from '../../../common/constants';
+import {
+  ReportCategory,
+  ReportSeverity,
+  ReportStatus,
+} from '../../../common/constants';
 
 export type ReportDocument = HydratedDocument<Report>;
 
@@ -40,6 +44,10 @@ export class Report {
     index: true,
   })
   status!: ReportStatus;
+
+  // only on reviewed (upheld) reports, weighs the Trust Score penalty
+  @Prop({ type: String, enum: ReportSeverity })
+  severity?: ReportSeverity;
 
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User' })
   resolvedBy?: Types.ObjectId;

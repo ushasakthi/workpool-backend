@@ -1,17 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import {
-  BookingStatus,
-  ReportStatus,
-  VerificationStatus,
-} from '../../common/constants';
+import { BookingStatus, VerificationStatus } from '../../common/constants';
 import { Booking, BookingDocument } from '../bookings/schemas/booking.schema';
 import { Report, ReportDocument } from '../reports/schemas/report.schema';
 import { Review, ReviewDocument } from '../reviews/schemas/review.schema';
 import { Ride, RideDocument } from '../rides/schemas/ride.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
-import { TrustScoreService } from './trust-score.service';
+import { complaintWeight, TrustScoreService } from './trust-score.service';
 
 interface History {
   completedRides: number;
@@ -100,13 +96,14 @@ export class TrustScoreUpdater {
       ])
       .exec();
 
-    // dismissed reports were judged unfounded by an admin
-    const complaintCount = await this.reportModel
-      .countDocuments({
-        reportedUser: userId,
-        status: { $ne: ReportStatus.DISMISSED },
-      })
+    // dismissed reports weigh 0, upheld ones by severity
+    const reports = await this.reportModel
+      .find({ reportedUser: userId }, { status: 1, severity: 1 })
       .exec();
+    const complaintCount = reports.reduce(
+      (sum, report) => sum + complaintWeight(report.status, report.severity),
+      0,
+    );
 
     return {
       completedRides,

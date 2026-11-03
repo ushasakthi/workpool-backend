@@ -1,6 +1,7 @@
 import { Model } from 'mongoose';
 import {
   BookingStatus,
+  ReportSeverity,
   ReportStatus,
   VerificationStatus,
 } from '../../common/constants';
@@ -23,7 +24,7 @@ describe('TrustScoreUpdater', () => {
   let rideModel: { find: jest.Mock };
   let bookingModel: { countDocuments: jest.Mock };
   let reviewModel: { aggregate: jest.Mock };
-  let reportModel: { countDocuments: jest.Mock };
+  let reportModel: { find: jest.Mock };
   let updater: TrustScoreUpdater;
 
   beforeEach(() => {
@@ -53,7 +54,7 @@ describe('TrustScoreUpdater', () => {
     reviewModel = {
       aggregate: jest.fn().mockReturnValue(query([{ count: 8, average: 4.6 }])),
     };
-    reportModel = { countDocuments: jest.fn().mockReturnValue(query(0)) };
+    reportModel = { find: jest.fn().mockReturnValue(query([])) };
 
     updater = new TrustScoreUpdater(
       userModel as unknown as Model<UserDocument>,
@@ -106,13 +107,27 @@ describe('TrustScoreUpdater', () => {
     });
   });
 
-  it('ignores dismissed reports', async () => {
+  it('weighs reports by severity and ignores dismissed ones', async () => {
+    reportModel.find.mockReturnValue(
+      query([
+        { status: ReportStatus.OPEN },
+        { status: ReportStatus.REVIEWED, severity: ReportSeverity.HIGH },
+        { status: ReportStatus.DISMISSED },
+      ]),
+    );
+
     await updater.recalculate(USER_ID);
 
-    expect(reportModel.countDocuments).toHaveBeenCalledWith({
-      reportedUser: USER_ID,
-      status: { $ne: ReportStatus.DISMISSED },
-    });
+    expect(reportModel.find).toHaveBeenCalledWith(
+      { reportedUser: USER_ID },
+      { status: 1, severity: 1 },
+    );
+    const [, update] = userModel.updateOne.mock.calls[0] as [
+      unknown,
+      { $set: { trustScore: Record<string, unknown> } },
+    ];
+    // open 1 + high 3 + dismissed 0
+    expect(update.$set.trustScore).toMatchObject({ complaintCount: 4 });
   });
 
   it('treats no reviews as no ratings yet', async () => {

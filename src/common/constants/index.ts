@@ -6,4 +6,5 @@ export * from './preferred-role.enum';
 export * from './weekday.enum';
 export * from './report-status.enum';
 export * from './report-category.enum';
+export * from './report-severity.enum';
 export * from './admin-action.enum';
