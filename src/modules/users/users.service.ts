@@ -2,14 +2,17 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { rm } from 'fs/promises';
 import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model } from 'mongoose';
 import { resolve } from 'path';
 import { AppConfig } from '../../config/configuration';
 import {
   AdminAction,
+  NicCheck,
   PreferredRole,
   UserRole,
   VerificationStatus,
@@ -23,6 +26,7 @@ import {
   encrypt,
   hmacDigest,
 } from '../../common/utils/encryption.util';
+import { NicCheckService } from './nic-check.service';
 import { User, UserDocument, Verification } from './schemas/user.schema';
 import {
   OwnUserProfile,
@@ -45,6 +49,7 @@ export interface SubmitVerificationInput {
   nicNumber: string;
   nicDocumentUrl: string;
   linkedinUrl: string;
+  submitAnyway?: boolean;
 }
 
 export interface VerificationSummary {
@@ -87,6 +92,7 @@ export class UsersService {
     private readonly configService: ConfigService<AppConfig, true>,
     private readonly trustScoreUpdater: TrustScoreUpdater,
     private readonly adminLogService: AdminLogService,
+    private readonly nicCheckService: NicCheckService,
   ) {}
 
   create(input: CreateUserInput): Promise<UserDocument> {
@@ -307,6 +313,23 @@ export class UsersService {
       );
     }
 
+    const { nicDocumentDir } = this.configService.get('uploads', {
+      infer: true,
+    });
+    const nicDocumentPath = resolve(nicDocumentDir, input.nicDocumentUrl);
+    const nicCheck = await this.nicCheckService.check(
+      nicDocumentPath,
+      input.nicNumber,
+    );
+
+    // the user is warned first and can choose to submit anyway
+    if (nicCheck === NicCheck.NOT_DETECTED && !input.submitAnyway) {
+      await rm(nicDocumentPath, { force: true });
+      throw new UnprocessableEntityException(
+        "We couldn't find your NIC number in this photo. Check the number, or upload a clear photo of the front of your NIC.",
+      );
+    }
+
     const encryptedNicNumber = encrypt(input.nicNumber, key);
 
     try {
@@ -321,6 +344,7 @@ export class UsersService {
             'verification.identityStatus': VerificationStatus.PENDING,
             'verification.workplaceStatus': VerificationStatus.PENDING,
             'verification.submittedAt': new Date(),
+            'verification.nicCheck': nicCheck,
             $unset: {
               'verification.reviewedBy': '',
               'verification.reviewedAt': '',

@@ -156,6 +156,7 @@ export class UsersController {
       nicNumber: dto.nicNumber,
       linkedinUrl: dto.linkedinUrl,
       nicDocumentUrl: file.filename,
+      submitAnyway: dto.submitAnyway === 'true',
     });
 
     return { message: 'Verification submitted and pending admin review.' };

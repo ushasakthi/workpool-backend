@@ -1,14 +1,20 @@
 import { resolve } from 'path';
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { getModelToken } from '@nestjs/mongoose';
 import { AdminLogService } from '../admin-log/admin-log.service';
 import { TrustScoreUpdater } from '../trust-score/trust-score.updater';
+import { NicCheckService } from './nic-check.service';
 import { UsersService } from './users.service';
 import { User } from './schemas/user.schema';
 import {
   AdminAction,
+  NicCheck,
   PreferredRole,
   UserRole,
   VerificationStatus,
@@ -20,8 +26,10 @@ describe('UsersService', () => {
   let usersService: UsersService;
   let trustScoreUpdater: { recalculate: jest.Mock };
   let adminLogService: { record: jest.Mock };
+  let nicCheckService: { check: jest.Mock };
   let userModel: {
     updateOne: jest.Mock;
+    updateMany: jest.Mock;
     find: jest.Mock;
     findOne: jest.Mock;
     findById: jest.Mock;
@@ -35,6 +43,7 @@ describe('UsersService', () => {
   beforeEach(async () => {
     userModel = {
       updateOne: jest.fn(),
+      updateMany: jest.fn(),
       find: jest.fn(),
       findOne: jest.fn(),
       findById: jest.fn(),
@@ -43,6 +52,9 @@ describe('UsersService', () => {
 
     trustScoreUpdater = { recalculate: jest.fn() };
     adminLogService = { record: jest.fn() };
+    nicCheckService = {
+      check: jest.fn().mockResolvedValue(NicCheck.NOT_CHECKED),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -50,6 +62,7 @@ describe('UsersService', () => {
         { provide: getModelToken(User.name), useValue: userModel },
         { provide: TrustScoreUpdater, useValue: trustScoreUpdater },
         { provide: AdminLogService, useValue: adminLogService },
+        { provide: NicCheckService, useValue: nicCheckService },
         {
           provide: ConfigService,
           useValue: {
@@ -493,6 +506,41 @@ describe('UsersService', () => {
           nicDocumentUrl: 'file.pdf',
         }),
       ).rejects.toThrow(ConflictException);
+    });
+
+    it('refuses a photo without the NIC number unless submitAnyway is set', async () => {
+      mockNoNicConflict();
+      nicCheckService.check.mockResolvedValue(NicCheck.NOT_DETECTED);
+
+      await expect(
+        usersService.submitVerification('user-1', {
+          nicNumber: '199912345678',
+          linkedinUrl: 'https://www.linkedin.com/in/test',
+          nicDocumentUrl: 'file.jpg',
+        }),
+      ).rejects.toThrow(UnprocessableEntityException);
+      expect(userModel.updateOne).not.toHaveBeenCalled();
+    });
+
+    it('saves a not-detected photo for the admin when submitAnyway is set', async () => {
+      mockNoNicConflict();
+      nicCheckService.check.mockResolvedValue(NicCheck.NOT_DETECTED);
+      userModel.updateOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(undefined),
+      });
+
+      await usersService.submitVerification('user-1', {
+        nicNumber: '199912345678',
+        linkedinUrl: 'https://www.linkedin.com/in/test',
+        nicDocumentUrl: 'file.jpg',
+        submitAnyway: true,
+      });
+
+      const [, update] = userModel.updateOne.mock.calls[0] as [
+        unknown,
+        Record<string, unknown>,
+      ];
+      expect(update['verification.nicCheck']).toBe(NicCheck.NOT_DETECTED);
     });
   });
 

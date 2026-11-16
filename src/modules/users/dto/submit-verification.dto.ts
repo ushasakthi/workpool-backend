@@ -1,5 +1,10 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsString, Matches } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  IsBooleanString,
+  IsOptional,
+  IsString,
+  Matches,
+} from 'class-validator';
 import {
   LINKEDIN_URL_REGEX,
   NIC_REGEX,
@@ -20,4 +25,13 @@ export class SubmitVerificationDto {
     message: 'linkedinUrl must be a linkedin.com profile URL',
   })
   linkedinUrl: string;
+
+  // form fields arrive as text, so this is 'true' / 'false'
+  @ApiPropertyOptional({
+    example: 'false',
+    description: 'Submit even if the NIC number was not found on the photo',
+  })
+  @IsOptional()
+  @IsBooleanString()
+  submitAnyway?: string;
 }

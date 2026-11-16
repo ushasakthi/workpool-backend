@@ -16,6 +16,7 @@ import {
 } from './profile-photo.constants';
 import { AdminLogModule } from '../admin-log/admin-log.module';
 import { TrustScoreModule } from '../trust-score/trust-score.module';
+import { NicCheckService } from './nic-check.service';
 import { User, UserSchema } from './schemas/user.schema';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
@@ -76,7 +77,7 @@ const isPhotoField = (file: { fieldname: string }) =>
     }),
   ],
   controllers: [UsersController],
-  providers: [UsersService],
+  providers: [UsersService, NicCheckService],
   exports: [UsersService],
 })
 export class UsersModule {}

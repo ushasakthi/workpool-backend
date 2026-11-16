@@ -1,6 +1,10 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
-import { UserRole, VerificationStatus } from '../../../common/constants';
+import {
+  NicCheck,
+  UserRole,
+  VerificationStatus,
+} from '../../../common/constants';
 import { TravelProfile, TravelProfileSchema } from './travel-profile.schema';
 import { TrustScore, TrustScoreSchema } from './trust-score.schema';
 
@@ -31,6 +35,10 @@ export class Verification {
 
   @Prop()
   submittedAt?: Date;
+
+  // result of reading the NIC number off the uploaded photo
+  @Prop({ type: String, enum: NicCheck })
+  nicCheck?: NicCheck;
 }
 
 export const VerificationSchema = SchemaFactory.createForClass(Verification);
