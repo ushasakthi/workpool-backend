@@ -85,6 +85,9 @@ describe('UsersService', () => {
       userModel.updateOne.mockReturnValue({
         exec: jest.fn().mockResolvedValue({}),
       });
+      userModel.updateMany.mockReturnValue({
+        exec: jest.fn().mockResolvedValue({}),
+      });
 
       await usersService.setPushToken('user-1', 'ExponentPushToken[abc]');
       await usersService.setPushToken('user-1', null);
@@ -99,6 +102,32 @@ describe('UsersService', () => {
         { _id: 'user-1' },
         { pushToken: null },
       );
+    });
+
+    it('takes the token off any other user on the same phone', async () => {
+      userModel.updateOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue({}),
+      });
+      userModel.updateMany.mockReturnValue({
+        exec: jest.fn().mockResolvedValue({}),
+      });
+
+      await usersService.setPushToken('nadesha', 'ExponentPushToken[phone]');
+
+      expect(userModel.updateMany).toHaveBeenCalledWith(
+        { pushToken: 'ExponentPushToken[phone]', _id: { $ne: 'nadesha' } },
+        { pushToken: null },
+      );
+    });
+
+    it('does not touch other users when clearing on logout', async () => {
+      userModel.updateOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue({}),
+      });
+
+      await usersService.setPushToken('user-1', null);
+
+      expect(userModel.updateMany).not.toHaveBeenCalled();
     });
 
     it('only maps users who have a token', async () => {

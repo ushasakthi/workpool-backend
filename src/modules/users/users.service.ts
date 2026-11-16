@@ -121,6 +121,12 @@ export class UsersService {
 
   // null on logout, so a logged-out phone stops getting notifications
   async setPushToken(userId: string, pushToken: string | null): Promise<void> {
+    // a token belongs to the phone, so take it off whoever used this phone before
+    if (pushToken) {
+      await this.userModel
+        .updateMany({ pushToken, _id: { $ne: userId } }, { pushToken: null })
+        .exec();
+    }
     await this.userModel.updateOne({ _id: userId }, { pushToken }).exec();
   }
 
