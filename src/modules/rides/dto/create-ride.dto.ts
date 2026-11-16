@@ -1,6 +1,7 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   ArrayNotEmpty,
   ArrayUnique,
   IsArray,
@@ -9,6 +10,7 @@ import {
   IsInt,
   IsMongoId,
   IsNumber,
+  IsOptional,
   Max,
   Min,
   MinDate,
@@ -34,6 +36,18 @@ export class CreateRideDto {
   @ValidateNested()
   @Type(() => GeoPointDto)
   destination!: GeoPointDto;
+
+  @ApiPropertyOptional({
+    type: [GeoPointDto],
+    maxItems: 3,
+    description: 'Up to 3 places you pass through, in driving order',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(3)
+  @ValidateNested({ each: true })
+  @Type(() => GeoPointDto)
+  via?: GeoPointDto[];
 
   @ApiProperty({
     example: '2026-09-15T07:30:00.000Z',

@@ -2,6 +2,7 @@ import { Weekday } from '../../../common/constants';
 import {
   availabilityScore,
   haversine,
+  nearestPointOnRoute,
   routeScore,
   ScorableRide,
   SmartMatchingService,
@@ -37,35 +38,88 @@ describe('haversine', () => {
   });
 });
 
+// a straight north-south route, to make the geometry easy to check by hand
+const SOUTH = { lat: 6.85, lng: 79.87 };
+const NORTH = { lat: 6.95, lng: 79.87 };
+// 0.01° of longitude at this latitude ≈ 1.1 km east of the line
+const EAST_OF_MIDDLE = { lat: 6.9, lng: 79.88 };
+
+describe('nearestPointOnRoute', () => {
+  it('finds the closest point part-way along a segment, not just the ends', () => {
+    const near = nearestPointOnRoute(EAST_OF_MIDDLE, [SOUTH, NORTH]);
+
+    expect(near.point.lat).toBeCloseTo(6.9, 4);
+    expect(near.distanceKm).toBeCloseTo(1.104, 2);
+    // halfway along an ~11.1 km route
+    expect(near.alongKm).toBeCloseTo(5.56, 1);
+  });
+
+  it('uses the start point for someone behind the start', () => {
+    const near = nearestPointOnRoute(HOME, [ORIGIN, DESTINATION]);
+
+    expect(near.alongKm).toBe(0);
+    expect(near.distanceKm).toBeCloseTo(2.0015, 2);
+  });
+
+  it('checks every segment of a route with passing-through places', () => {
+    // the route bends east through a via point right next to the passenger
+    const via = { lat: 6.9, lng: 79.881 };
+    expect(
+      nearestPointOnRoute(EAST_OF_MIDDLE, [SOUTH, via, NORTH]).distanceKm,
+    ).toBeLessThan(0.2);
+  });
+});
+
 describe('routeScore', () => {
-  it('is 1 when pickup is at home', () => {
-    expect(routeScore(HOME, HOME)).toBe(1);
+  it('is 1 when the route passes through home', () => {
+    expect(routeScore(HOME, undefined, [HOME, WORK])).toBe(1);
   });
 
-  it('drops in a straight line with distance', () => {
-    expect(routeScore(HOME, ORIGIN)).toBeCloseTo(0.5997, 3);
+  it('drops in a straight line with distance from the route, 0 at 3 km', () => {
+    // 2 km from the start: 1 − 2/3
+    expect(routeScore(HOME, WORK, [ORIGIN, DESTINATION])).toBeCloseTo(
+      0.3328,
+      3,
+    );
   });
 
-  it('is 0 at 5 km or more', () => {
-    expect(routeScore(HOME, FAR_AWAY)).toBe(0);
+  it('scores someone beside the middle of the route, not only near the start', () => {
+    // ~1.1 km from the line, but ~5.6 km from the start
+    expect(routeScore(EAST_OF_MIDDLE, NORTH, [SOUTH, NORTH])).toBeCloseTo(
+      0.632,
+      2,
+    );
+  });
+
+  it('is 0 when the driver goes the other way', () => {
+    // home is near the end of the route and work near its start
+    expect(routeScore(NORTH, SOUTH, [SOUTH, NORTH])).toBe(0);
+  });
+
+  it('is 0 at 3 km or more', () => {
+    expect(routeScore(FAR_AWAY, undefined, [ORIGIN, DESTINATION])).toBe(0);
   });
 
   it('is 0 when home is missing', () => {
-    expect(routeScore(undefined, ORIGIN)).toBe(0);
+    expect(routeScore(undefined, WORK, [ORIGIN, DESTINATION])).toBe(0);
   });
 });
 
 describe('workplaceScore', () => {
   it('drops in a straight line with distance', () => {
-    expect(workplaceScore(WORK, DESTINATION)).toBeCloseTo(0.4996, 3);
+    expect(workplaceScore(WORK, [DESTINATION])).toBeCloseTo(0.4996, 3);
   });
 
   it('is 0 at 2 km or more', () => {
-    expect(workplaceScore(WORK, FAR_AWAY)).toBe(0);
+    expect(workplaceScore(WORK, [FAR_AWAY])).toBe(0);
   });
 
   it('is 0 when work is missing', () => {
-    expect(workplaceScore(undefined, DESTINATION)).toBe(0);
+    expect(workplaceScore(undefined, [DESTINATION])).toBe(0);
+  });
+
+  it('uses a passing-through stop when it is closer than the destination', () => {
+    expect(workplaceScore(WORK, [WORK, FAR_AWAY])).toBe(1);
   });
 });
 
@@ -120,7 +174,7 @@ describe('SmartMatchingService.calculateScore', () => {
     daysAvailable: WEEKDAYS,
   };
 
-  it('matches the worked example (about 70%)', () => {
+  it('matches the worked example (about 59%)', () => {
     const ride: ScorableRide = {
       origin: ORIGIN,
       destination: DESTINATION,
@@ -130,7 +184,9 @@ describe('SmartMatchingService.calculateScore', () => {
 
     const result = service.calculateScore(profile, ride);
 
-    expect(result.score).toBeCloseTo(0.6998, 3);
+    expect(result.score).toBeCloseTo(0.5931, 3);
+    // home is 2 km behind the start: 1 − 2/3
+    expect(result.breakdown.route).toBeCloseTo(0.3328, 3);
     expect(result.breakdown.time).toBe(1);
     expect(result.breakdown.availability).toBe(0.6);
   });

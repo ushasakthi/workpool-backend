@@ -6,7 +6,8 @@ import { Ride } from '../schemas/ride.schema';
 
 // see docs/sms-formula.md before changing any of these
 const WEIGHTS = { route: 0.4, time: 0.3, workplace: 0.2, availability: 0.1 };
-const PICKUP_CUTOFF_KM = 5;
+// the driver passes near you, so the pickup should be close to home
+export const PICKUP_CUTOFF_KM = 3;
 const DROPOFF_CUTOFF_KM = 2;
 const EARTH_RADIUS_KM = 6371;
 // Sri Lanka is UTC+5:30 all year, no daylight saving
@@ -28,7 +29,17 @@ export interface SmsResult {
 export type ScorableRide = Pick<
   Ride,
   'origin' | 'destination' | 'departureTime' | 'daysOfWeek'
->;
+> &
+  Partial<Pick<Ride, 'via'>>;
+
+export interface RoutePoint {
+  // the closest point on the route
+  point: GeoPoint;
+  // how far that is from the point we asked about
+  distanceKm: number;
+  // how far along the route it is, from the start
+  alongKm: number;
+}
 
 function toRadians(degrees: number): number {
   return (degrees * Math.PI) / 180;
@@ -53,17 +64,89 @@ function distanceScore(km: number, cutoffKm: number): number {
   return Math.max(0, 1 - km / cutoffKm);
 }
 
-export function routeScore(home?: GeoPoint, origin?: GeoPoint): number {
-  if (!home || !origin) return 0;
-  return distanceScore(haversine(home, origin), PICKUP_CUTOFF_KM);
+// start → passing-through places → destination
+export function rideRoute(
+  ride: Partial<Pick<Ride, 'via'>> & Pick<Ride, 'origin' | 'destination'>,
+): GeoPoint[] {
+  return [ride.origin, ...(ride.via ?? []), ride.destination];
 }
 
+// lat/lng as flat x/y in km around refLat; accurate enough across a city
+function toFlatKm(p: GeoPoint, refLat: number): { x: number; y: number } {
+  return {
+    x: toRadians(p.lng) * Math.cos(toRadians(refLat)) * EARTH_RADIUS_KM,
+    y: toRadians(p.lat) * EARTH_RADIUS_KM,
+  };
+}
+
+// the point on the route's straight segments closest to `point`
+export function nearestPointOnRoute(
+  point: GeoPoint,
+  route: GeoPoint[],
+): RoutePoint {
+  const p = toFlatKm(point, point.lat);
+  let best: RoutePoint = {
+    point: route[0],
+    distanceKm: haversine(point, route[0]),
+    alongKm: 0,
+  };
+  let walkedKm = 0;
+
+  for (let i = 0; i < route.length - 1; i++) {
+    const a = toFlatKm(route[i], point.lat);
+    const b = toFlatKm(route[i + 1], point.lat);
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const lengthSq = dx * dx + dy * dy;
+    // t = 0 at the segment's start, 1 at its end
+    const t =
+      lengthSq === 0
+        ? 0
+        : Math.max(
+            0,
+            Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSq),
+          );
+    const distanceKm = Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+    const segmentKm = Math.sqrt(lengthSq);
+
+    if (distanceKm < best.distanceKm) {
+      best = {
+        point: {
+          lat: route[i].lat + t * (route[i + 1].lat - route[i].lat),
+          lng: route[i].lng + t * (route[i + 1].lng - route[i].lng),
+        },
+        distanceKm,
+        alongKm: walkedKm + t * segmentKm,
+      };
+    }
+    walkedKm += segmentKm;
+  }
+  return best;
+}
+
+// how close the driver's route passes to home; 0 if they drive the other way
+export function routeScore(
+  home: GeoPoint | undefined,
+  work: GeoPoint | undefined,
+  route: GeoPoint[],
+): number {
+  if (!home || route.length === 0) return 0;
+  const pickup = nearestPointOnRoute(home, route);
+  // reaching work before home along the route = wrong direction
+  if (work && nearestPointOnRoute(work, route).alongKm < pickup.alongKm) {
+    return 0;
+  }
+  return distanceScore(pickup.distanceKm, PICKUP_CUTOFF_KM);
+}
+
+// uses whichever stop is closest to work: a passing-through place or the destination
 export function workplaceScore(
   work?: GeoPoint,
-  destination?: GeoPoint,
+  stops: GeoPoint[] = [],
 ): number {
-  if (!work || !destination) return 0;
-  return distanceScore(haversine(work, destination), DROPOFF_CUTOFF_KM);
+  if (!work || stops.length === 0) return 0;
+  const closestKm = Math.min(...stops.map((stop) => haversine(work, stop)));
+  return distanceScore(closestKm, DROPOFF_CUTOFF_KM);
 }
 
 // "08:30" → 510
@@ -109,9 +192,16 @@ export class SmartMatchingService {
     ride: ScorableRide,
   ): SmsResult {
     const breakdown: SmsBreakdown = {
-      route: routeScore(profile?.homeLocation, ride.origin),
+      route: routeScore(
+        profile?.homeLocation,
+        profile?.workLocation,
+        rideRoute(ride),
+      ),
       time: timeScore(profile?.workStartTime, ride.departureTime),
-      workplace: workplaceScore(profile?.workLocation, ride.destination),
+      workplace: workplaceScore(profile?.workLocation, [
+        ...(ride.via ?? []),
+        ride.destination,
+      ]),
       availability: availabilityScore(profile?.daysAvailable, ride.daysOfWeek),
     };
 

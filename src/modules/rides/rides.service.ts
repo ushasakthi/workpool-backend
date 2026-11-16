@@ -1,7 +1,9 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model } from 'mongoose';
@@ -13,11 +15,13 @@ import { VehiclesService } from '../vehicles/vehicles.service';
 import { GeoPoint } from '../../common/schemas/geo-point.schema';
 import {
   colomboMinutesOfDay,
-  haversine,
   hhmmToMinutes,
+  nearestPointOnRoute,
+  rideRoute,
   SmartMatchingService,
   SmsResult,
 } from './matching/smart-matching.service';
+import { circlePolygon, GeoJsonLineString, toRouteLine } from './route-line';
 import { Ride, RideDocument } from './schemas/ride.schema';
 import {
   serializeRide,
@@ -27,7 +31,16 @@ import {
   RideWithMatchView,
 } from './serializers/ride.serializer';
 
-const EARTH_RADIUS_KM = 6371;
+// a line needs two different places
+function routeLineOrThrow(points: GeoPointInput[]): GeoJsonLineString {
+  const line = toRouteLine(points);
+  if (line.coordinates.length < 2) {
+    throw new BadRequestException(
+      'Start and destination must be different places',
+    );
+  }
+  return line;
+}
 
 export interface GeoPointInput {
   lat: number;
@@ -39,6 +52,7 @@ export interface CreateRideInput {
   vehicleId: string;
   origin: GeoPointInput;
   destination: GeoPointInput;
+  via?: GeoPointInput[];
   departureTime: Date;
   daysOfWeek: Weekday[];
   seatsAvailable: number;
@@ -58,13 +72,36 @@ export interface SearchRidesInput {
 }
 
 @Injectable()
-export class RidesService {
+export class RidesService implements OnModuleInit {
+  private readonly logger = new Logger(RidesService.name);
+
   constructor(
     @InjectModel(Ride.name) private readonly rideModel: Model<RideDocument>,
     private readonly vehiclesService: VehiclesService,
     private readonly usersService: UsersService,
     private readonly smartMatchingService: SmartMatchingService,
   ) {}
+
+  // runs once on startup: rides posted before routes existed get a
+  // start → destination line, so route search still finds them
+  async onModuleInit(): Promise<void> {
+    const older = await this.rideModel
+      .find({ routeLine: { $exists: false } })
+      .exec();
+    for (const ride of older) {
+      const line = toRouteLine(rideRoute(ride));
+      if (line.coordinates.length < 2) continue;
+      try {
+        await this.rideModel
+          .updateOne({ _id: ride._id }, { $set: { routeLine: line } })
+          .exec();
+      } catch (err) {
+        this.logger.warn(
+          `No route line for ride ${ride.id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+  }
 
   async create(driverId: string, input: CreateRideInput): Promise<RideView> {
     await this.assertVehicleFitsRide(
@@ -77,6 +114,7 @@ export class RidesService {
       ...input,
       originPoint: toGeoJsonPoint(input.origin),
       destinationPoint: toGeoJsonPoint(input.destination),
+      routeLine: routeLineOrThrow(rideRoute(input)),
       driverId,
       status: RideStatus.ACTIVE,
     }).save();
@@ -110,12 +148,10 @@ export class RidesService {
         status: RideStatus.ACTIVE,
         driverId: { $ne: passengerId },
         seatsAvailable: { $gt: 0 },
-        originPoint: {
-          $geoWithin: {
-            $centerSphere: [
-              [home.lng, home.lat],
-              input.maxDistanceKm / EARTH_RADIUS_KM,
-            ],
+        // rides whose route line crosses a circle of maxDistanceKm around home
+        routeLine: {
+          $geoIntersects: {
+            $geometry: circlePolygon(home, input.maxDistanceKm),
           },
         },
       })
@@ -184,6 +220,19 @@ export class RidesService {
       );
     }
 
+    // the line needs all three parts, so fill in whatever didn't change
+    let routeLine: GeoJsonLineString | undefined;
+    if (input.origin || input.destination || input.via) {
+      const current = await this.getRideOrThrow(id);
+      routeLine = routeLineOrThrow(
+        rideRoute({
+          origin: input.origin ?? current.origin,
+          via: input.via ?? current.via,
+          destination: input.destination ?? current.destination,
+        }),
+      );
+    }
+
     // keep the GeoJSON copies in sync when the route changes
     const set = buildUpdateSet({
       ...input,
@@ -191,6 +240,7 @@ export class RidesService {
       destinationPoint: input.destination
         ? toGeoJsonPoint(input.destination)
         : undefined,
+      routeLine,
     });
     const update = Object.keys(set).length > 0 ? { $set: set } : {};
     const ride = await this.rideModel
@@ -217,7 +267,10 @@ export class RidesService {
     return {
       ...serializeRide(ride),
       match,
-      pickupDistanceKm: home ? haversine(home, ride.origin) : null,
+      // where the route passes closest to home, not just the start point
+      pickupDistanceKm: home
+        ? nearestPointOnRoute(home, rideRoute(ride)).distanceKm
+        : null,
       driver: {
         id: driver.id,
         name: driver.name,

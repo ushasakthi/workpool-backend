@@ -9,19 +9,20 @@ import {
   Min,
 } from 'class-validator';
 import { TIME_HHMM_REGEX } from '../../../common/utils/validation-patterns';
+import { PICKUP_CUTOFF_KM } from '../matching/smart-matching.service';
 
 export class SearchRidesQueryDto {
   @ApiPropertyOptional({
-    example: 5,
-    default: 5,
-    description: 'Max distance (km) from your home to the pickup point',
+    example: 3,
+    default: 3,
+    description: "Max distance (km) from your home to the driver's route",
   })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0.5)
   @Max(50)
-  maxDistanceKm: number = 5;
+  maxDistanceKm: number = PICKUP_CUTOFF_KM;
 
   @ApiPropertyOptional({
     example: '06:30',

@@ -6,6 +6,7 @@ import { UsersService } from '../users/users.service';
 import { VehiclesService } from '../vehicles/vehicles.service';
 import { SmartMatchingService } from './matching/smart-matching.service';
 import { RidesService } from './rides.service';
+import { circlePolygon } from './route-line';
 import { Ride } from './schemas/ride.schema';
 
 interface MockRideModel {
@@ -249,7 +250,7 @@ describe('RidesService', () => {
       expect(rideModel.find).not.toHaveBeenCalled();
     });
 
-    it('only looks at active rides from other drivers near home', async () => {
+    it('only looks at active rides from other drivers whose route passes near home', async () => {
       usersService.findMe.mockResolvedValue(passenger({ lat: 6.9, lng: 79.8 }));
       mockFind([]);
 
@@ -259,8 +260,10 @@ describe('RidesService', () => {
         status: RideStatus.ACTIVE,
         driverId: { $ne: 'passenger-1' },
         seatsAvailable: { $gt: 0 },
-        originPoint: {
-          $geoWithin: { $centerSphere: [[79.8, 6.9], 3 / 6371] },
+        routeLine: {
+          $geoIntersects: {
+            $geometry: circlePolygon({ lat: 6.9, lng: 79.8 }, 3),
+          },
         },
       });
     });

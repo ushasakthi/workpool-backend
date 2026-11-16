@@ -1,4 +1,5 @@
-import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { Prop, raw, Schema, SchemaFactory } from '@nestjs/mongoose';
+import type { GeoJsonLineString } from '../route-line';
 import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 import { RideStatus, Weekday } from '../../../common/constants';
 import {
@@ -32,6 +33,19 @@ export class Ride {
 
   @Prop({ type: GeoPointSchema, required: true })
   destination!: GeoPoint;
+
+  // up to 3 places the driver passes through, in driving order
+  @Prop({ type: [GeoPointSchema], default: [] })
+  via!: GeoPoint[];
+
+  // GeoJSON line start → via → destination, for "route passes near home" search
+  @Prop(
+    raw({
+      type: { type: String, enum: ['LineString'] },
+      coordinates: { type: [[Number]] },
+    }),
+  )
+  routeLine?: GeoJsonLineString;
 
   // GeoJSON copies of origin/destination for the geo index, set by RidesService
   @Prop({ type: GeoJsonPointSchema })
@@ -68,3 +82,4 @@ export const RideSchema = SchemaFactory.createForClass(Ride);
 // ride search filters by pickup distance, without these it scans every ride
 RideSchema.index({ originPoint: '2dsphere' });
 RideSchema.index({ destinationPoint: '2dsphere' });
+RideSchema.index({ routeLine: '2dsphere' });

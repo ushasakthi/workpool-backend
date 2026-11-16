@@ -19,6 +19,8 @@ export interface RideView {
   vehicleId: string;
   origin: GeoPointView;
   destination: GeoPointView;
+  // places the driver passes through, in order
+  via: GeoPointView[];
   departureTime: Date;
   daysOfWeek: Weekday[];
   seatsAvailable: number;
@@ -64,6 +66,7 @@ export function serializeRide(ride: RideDocument): RideView {
     vehicleId: String(ride.vehicleId),
     origin: toPointView(ride.origin),
     destination: toPointView(ride.destination),
+    via: (ride.via ?? []).map(toPointView),
     departureTime: ride.departureTime,
     daysOfWeek: ride.daysOfWeek ?? [],
     seatsAvailable: ride.seatsAvailable,
