@@ -14,6 +14,7 @@ import { BookingsModule } from './modules/bookings/bookings.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { SosModule } from './modules/sos/sos.module';
+import { GeocodeModule } from './modules/geocode/geocode.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { SosModule } from './modules/sos/sos.module';
     ReviewsModule,
     ReportsModule,
     SosModule,
+    GeocodeModule,
   ],
 })
 export class AppModule {}

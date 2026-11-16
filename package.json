@@ -16,6 +16,7 @@
     "backfill:nic-hash": "ts-node -r tsconfig-paths/register src/database/backfill-nic-hash.ts",
     "backfill:ride-points": "ts-node -r tsconfig-paths/register src/database/backfill-ride-points.ts",
     "backfill:trust-scores": "ts-node -r tsconfig-paths/register src/database/backfill-trust-scores.ts",
+    "backfill:place-labels": "ts-node -r tsconfig-paths/register src/database/backfill-place-labels.ts",
     "seed:demo": "ts-node -r tsconfig-paths/register src/database/seed-demo.ts",
     "perf:search": "ts-node -r tsconfig-paths/register src/database/perf-search.ts",
     "export:openapi": "ts-node -r tsconfig-paths/register src/tools/export-openapi.ts",
