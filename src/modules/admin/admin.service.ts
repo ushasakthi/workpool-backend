@@ -22,7 +22,21 @@ import { AdminLogService } from '../admin-log/admin-log.service';
 import { Booking, BookingDocument } from '../bookings/schemas/booking.schema';
 import { Report, ReportDocument } from '../reports/schemas/report.schema';
 import { Ride, RideDocument } from '../rides/schemas/ride.schema';
+import {
+  GeoPointView,
+  RideView,
+  serializeRide,
+} from '../rides/serializers/ride.serializer';
 import { User, UserDocument } from '../users/schemas/user.schema';
+import {
+  serializeOwnProfile,
+  TravelProfileView,
+} from '../users/serializers/user-profile.serializer';
+import { Vehicle, VehicleDocument } from '../vehicles/schemas/vehicle.schema';
+import {
+  serializeVehicle,
+  VehicleView,
+} from '../vehicles/serializers/vehicle.serializer';
 
 export interface ListUsersInput {
   q?: string;
@@ -58,6 +72,35 @@ export interface AdminUsersPage {
   total: number;
   // across everyone, for the "12 users · 1 suspended" line
   counts: { all: number; suspended: number };
+}
+
+// a ride the user joined as a passenger
+export interface AdminJoinedRideView {
+  bookingId: string;
+  status: BookingStatus;
+  seatsRequested: number;
+  requestedAt: Date;
+  // null if the ride was deleted
+  ride: {
+    origin: GeoPointView;
+    destination: GeoPointView;
+    departureTime: Date;
+    // shared fuel cost, not a fare
+    costContribution: number;
+  } | null;
+}
+
+// everything an admin sees on one user's detail page
+export interface AdminUserDetail extends AdminUserView {
+  phone: string;
+  linkedinUrl?: string;
+  travelProfile?: TravelProfileView;
+  emergencyContact?: { name: string; phone: string };
+  vehicles: VehicleView[];
+  // as the driver, newest first
+  ridesOffered: RideView[];
+  // as a passenger, newest first
+  ridesJoined: AdminJoinedRideView[];
 }
 
 export interface AdminStats {
@@ -102,6 +145,8 @@ const FULLY_VERIFIED = {
 };
 
 const DAY_MS = 86_400_000;
+// most recent trips shown on the user detail page
+const TRIPS_LIMIT = 20;
 
 // "a.b" in a search box should match the text "a.b", not "any character"
 function escapeRegex(text: string): string {
@@ -119,6 +164,8 @@ export class AdminService {
     private readonly bookingModel: Model<BookingDocument>,
     @InjectModel(Report.name)
     private readonly reportModel: Model<ReportDocument>,
+    @InjectModel(Vehicle.name)
+    private readonly vehicleModel: Model<VehicleDocument>,
     @InjectModel(AdminActionLog.name)
     private readonly logModel: Model<AdminActionLogDocument>,
     private readonly adminLogService: AdminLogService,
@@ -164,6 +211,66 @@ export class AdminService {
       limit: input.limit,
       total,
       counts: { all, suspended },
+    };
+  }
+
+  async getUserDetail(userId: string): Promise<AdminUserDetail> {
+    if (!isValidObjectId(userId)) {
+      throw new NotFoundException('User not found');
+    }
+    const user = await this.userModel.findById(userId).exec();
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const [vehicles, ridesOffered, bookings] = await Promise.all([
+      this.vehicleModel.find({ ownerId: userId }).exec(),
+      this.rideModel
+        .find({ driverId: userId })
+        .sort({ departureTime: -1 })
+        .limit(TRIPS_LIMIT)
+        .exec(),
+      this.bookingModel
+        .find({ passengerId: userId })
+        .sort({ requestedAt: -1 })
+        .limit(TRIPS_LIMIT)
+        .exec(),
+    ]);
+
+    // one query for all the joined rides instead of one per booking
+    const joinedRides = await this.rideModel
+      .find({ _id: { $in: bookings.map((b) => b.rideId) } })
+      .exec();
+    const ridesById = new Map(joinedRides.map((r) => [r.id, r]));
+
+    // the admin sees exact locations and the emergency contact, like the owner does
+    const profile = serializeOwnProfile(user);
+
+    return {
+      ...toAdminUserView(user),
+      phone: user.phone,
+      linkedinUrl: user.linkedinUrl,
+      travelProfile: profile.travelProfile,
+      emergencyContact: profile.emergencyContact,
+      vehicles: vehicles.map(serializeVehicle),
+      ridesOffered: ridesOffered.map(serializeRide),
+      ridesJoined: bookings.map((booking) => {
+        const ride = ridesById.get(String(booking.rideId));
+        return {
+          bookingId: booking.id,
+          status: booking.status,
+          seatsRequested: booking.seatsRequested,
+          requestedAt: booking.requestedAt,
+          ride: ride
+            ? {
+                origin: toPointView(ride.origin),
+                destination: toPointView(ride.destination),
+                departureTime: ride.departureTime,
+                costContribution: ride.costContribution,
+              }
+            : null,
+        };
+      }),
     };
   }
 
@@ -344,6 +451,10 @@ export class AdminService {
       targetUser: entry.targetUserId ? person(entry.targetUserId) : undefined,
     }));
   }
+}
+
+function toPointView(point: GeoPointView): GeoPointView {
+  return { lat: point.lat, lng: point.lng, label: point.label };
 }
 
 function toAdminUserView(user: UserDocument): AdminUserView {

@@ -34,6 +34,14 @@ export class AdminUsersController {
     return this.adminService.listUsers(query);
   }
 
+  @ApiOperation({
+    summary: "One user's profile, vehicles, travel profile and trips",
+  })
+  @Get(':id')
+  detail(@Param('id') id: string) {
+    return this.adminService.getUserDetail(id);
+  }
+
   @ApiOperation({ summary: 'Suspend a user, or lift a suspension' })
   @Patch(':id/suspend')
   suspend(

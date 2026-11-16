@@ -13,6 +13,7 @@ import { Booking } from '../bookings/schemas/booking.schema';
 import { Report } from '../reports/schemas/report.schema';
 import { Ride } from '../rides/schemas/ride.schema';
 import { User } from '../users/schemas/user.schema';
+import { Vehicle } from '../vehicles/schemas/vehicle.schema';
 import { AdminService } from './admin.service';
 
 const ADMIN_ID = '5f9d88b8b54764421b7156a0';
@@ -47,8 +48,13 @@ describe('AdminService', () => {
     countDocuments: jest.Mock;
     findOne: jest.Mock;
   };
-  let rideModel: { updateMany: jest.Mock; countDocuments: jest.Mock };
-  let bookingModel: { countDocuments: jest.Mock };
+  let rideModel: {
+    updateMany: jest.Mock;
+    countDocuments: jest.Mock;
+    find: jest.Mock;
+  };
+  let bookingModel: { countDocuments: jest.Mock; find: jest.Mock };
+  let vehicleModel: { find: jest.Mock };
   let reportModel: { countDocuments: jest.Mock; findOne: jest.Mock };
   let logModel: { find: jest.Mock };
   let adminLogService: { record: jest.Mock };
@@ -64,8 +70,13 @@ describe('AdminService', () => {
     rideModel = {
       updateMany: jest.fn().mockReturnValue(query({})),
       countDocuments: jest.fn().mockReturnValue(query(0)),
+      find: jest.fn(),
     };
-    bookingModel = { countDocuments: jest.fn().mockReturnValue(query(0)) };
+    bookingModel = {
+      countDocuments: jest.fn().mockReturnValue(query(0)),
+      find: jest.fn(),
+    };
+    vehicleModel = { find: jest.fn() };
     reportModel = {
       countDocuments: jest.fn().mockReturnValue(query(0)),
       findOne: jest.fn(),
@@ -80,6 +91,7 @@ describe('AdminService', () => {
         { provide: getModelToken(Ride.name), useValue: rideModel },
         { provide: getModelToken(Booking.name), useValue: bookingModel },
         { provide: getModelToken(Report.name), useValue: reportModel },
+        { provide: getModelToken(Vehicle.name), useValue: vehicleModel },
         { provide: getModelToken(AdminActionLog.name), useValue: logModel },
         { provide: AdminLogService, useValue: adminLogService },
       ],
@@ -165,6 +177,106 @@ describe('AdminService', () => {
 
       expect(items[0]).not.toHaveProperty('passwordHash');
       expect(items[0]).not.toHaveProperty('refreshTokenHash');
+    });
+  });
+
+  describe('getUserDetail', () => {
+    const RIDE_ID = '5f9d88b8b54764421b7156d1';
+    const sortedLimited = (value: unknown[]) => ({
+      sort: () => ({ limit: () => query(value) }),
+    });
+    const point = (label: string) => ({ lat: 6.9, lng: 79.8, label });
+    const rideDoc = {
+      id: RIDE_ID,
+      driverId: 'driver',
+      vehicleId: 'vehicle',
+      origin: point('Home'),
+      destination: point('Office'),
+      departureTime: new Date('2026-11-01T08:00:00Z'),
+      daysOfWeek: [],
+      seatsAvailable: 3,
+      costContribution: 400,
+      status: RideStatus.ACTIVE,
+    };
+
+    it('returns the profile, emergency contact, vehicles and trips', async () => {
+      userModel.findById.mockReturnValue(
+        query(
+          userDoc({
+            phone: '+94771234567',
+            travelProfile: {
+              homeLocation: point('Home'),
+              daysAvailable: [],
+              hideWorkplaceName: false,
+            },
+            emergencyContact: { name: 'Amali', phone: '+94770000000' },
+          }),
+        ),
+      );
+      vehicleModel.find.mockReturnValue(
+        query([
+          {
+            id: 'v1',
+            ownerId: USER_ID,
+            make: 'Toyota',
+            model: 'Aqua',
+            year: 2018,
+            plateNumber: 'CAB-1234',
+            seatsAvailable: 3,
+            isActive: true,
+          },
+        ]),
+      );
+      rideModel.find
+        .mockReturnValueOnce(sortedLimited([rideDoc]))
+        .mockReturnValueOnce(query([rideDoc]));
+      bookingModel.find.mockReturnValue(
+        sortedLimited([
+          {
+            id: 'b1',
+            rideId: RIDE_ID,
+            status: 'completed',
+            seatsRequested: 1,
+            requestedAt: new Date('2026-10-30'),
+          },
+          {
+            id: 'b2',
+            rideId: '5f9d88b8b54764421b7156ff',
+            status: 'cancelled',
+            seatsRequested: 1,
+            requestedAt: new Date('2026-10-29'),
+          },
+        ]),
+      );
+
+      const result = await service.getUserDetail(USER_ID);
+
+      expect(result).toMatchObject({
+        name: 'Ushaa',
+        phone: '+94771234567',
+        emergencyContact: { name: 'Amali', phone: '+94770000000' },
+        // exact, not fuzzed like other users see it
+        travelProfile: { homeLocation: point('Home'), approximate: false },
+      });
+      expect(result.vehicles[0].plateNumber).toBe('CAB-1234');
+      expect(result.ridesOffered[0].id).toBe(RIDE_ID);
+      expect(result.ridesJoined[0].ride).toMatchObject({
+        origin: point('Home'),
+        costContribution: 400,
+      });
+      // the second booking's ride no longer exists
+      expect(result.ridesJoined[1].ride).toBeNull();
+      expect(result).not.toHaveProperty('passwordHash');
+    });
+
+    it('404s on an unknown or malformed id', async () => {
+      await expect(service.getUserDetail('nope')).rejects.toThrow(
+        NotFoundException,
+      );
+      userModel.findById.mockReturnValue(query(null));
+      await expect(service.getUserDetail(USER_ID)).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
