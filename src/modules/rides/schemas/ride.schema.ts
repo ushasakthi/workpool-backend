@@ -60,7 +60,7 @@ export class Ride {
   @Prop({ type: [String], enum: Weekday, default: [] })
   daysOfWeek!: Weekday[];
 
-  // goes down as bookings are accepted, 0 = full
+  // seats offered each day; seats left on a day are counted from that day's bookings
   @Prop({ required: true, min: 0 })
   seatsAvailable!: number;
 

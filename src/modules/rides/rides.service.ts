@@ -297,28 +297,6 @@ export class RidesService implements OnModuleInit {
     return rides.map((ride) => ride.id);
   }
 
-  // One atomic update: only takes the seats if enough are still free, so two
-  // accepts at the same moment can't both succeed and overbook the ride.
-  async reserveSeats(rideId: string, seats: number): Promise<boolean> {
-    const ride = await this.rideModel
-      .findOneAndUpdate(
-        {
-          _id: rideId,
-          status: RideStatus.ACTIVE,
-          seatsAvailable: { $gte: seats },
-        },
-        { $inc: { seatsAvailable: -seats } },
-      )
-      .exec();
-    return ride !== null;
-  }
-
-  async releaseSeats(rideId: string, seats: number): Promise<void> {
-    await this.rideModel
-      .updateOne({ _id: rideId }, { $inc: { seatsAvailable: seats } })
-      .exec();
-  }
-
   // The vehicle must exist and belong to the driver, and can't seat fewer
   // passengers than the ride offers.
   private async assertVehicleFitsRide(

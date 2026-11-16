@@ -4,9 +4,11 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { randomInt } from 'crypto';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { BookingStatus, RideStatus } from '../../common/constants';
+import { AppConfig } from '../../config/configuration';
 import { RidesService } from '../rides/rides.service';
 import { serializeRide } from '../rides/serializers/ride.serializer';
 import { TrustScoreUpdater } from '../trust-score/trust-score.updater';
@@ -24,7 +26,14 @@ import {
 } from './savings/savings';
 import { BookingParties, findBookingParties } from './guards/booking-parties';
 import { BookingNotifier } from './notifications/booking-notifier';
+import { isWithinPickupWindow } from './pickup-window';
+import {
+  colomboDateString,
+  isValidTravelDate,
+  upcomingTravelDates,
+} from './travel-date';
 import { Review, ReviewDocument } from '../reviews/schemas/review.schema';
+import { Trip, TripDocument } from '../trips/schemas/trip.schema';
 import { Booking, BookingDocument } from './schemas/booking.schema';
 import {
   BookingListItem,
@@ -39,9 +48,16 @@ export interface SavingsView {
   asDriver: DriverSharing;
 }
 
+export interface TravelDayView {
+  // "2026-11-18"
+  date: string;
+  seatsLeft: number;
+}
+
 export interface CreateBookingInput {
   rideId: string;
   seatsRequested: number;
+  travelDate: string;
 }
 
 // bookings that still hold (or are waiting for) a seat
@@ -59,10 +75,13 @@ export class BookingsService {
     private readonly bookingModel: Model<BookingDocument>,
     @InjectModel(Review.name)
     private readonly reviewModel: Model<ReviewDocument>,
+    @InjectModel(Trip.name)
+    private readonly tripModel: Model<TripDocument>,
     private readonly ridesService: RidesService,
     private readonly usersService: UsersService,
     private readonly trustScoreUpdater: TrustScoreUpdater,
     private readonly notifier: BookingNotifier,
+    private readonly configService: ConfigService<AppConfig, true>,
   ) {}
 
   async request(
@@ -77,9 +96,19 @@ export class BookingsService {
     if (String(ride.driverId) === passengerId) {
       throw new BadRequestException("You can't book your own ride");
     }
-    if (input.seatsRequested > ride.seatsAvailable) {
+    if (!isValidTravelDate(ride, input.travelDate, new Date())) {
       throw new BadRequestException(
-        `Only ${ride.seatsAvailable} seat(s) left on this ride`,
+        'Pick a day this ride runs, within the next 7 days',
+      );
+    }
+    if (await this.tripStarted(input.rideId, input.travelDate)) {
+      throw new BadRequestException('This ride has already left that day');
+    }
+    const taken = await this.seatsTaken(input.rideId, input.travelDate);
+    const seatsLeft = ride.seatsAvailable - taken;
+    if (input.seatsRequested > seatsLeft) {
+      throw new BadRequestException(
+        `Only ${seatsLeft} seat(s) left on this ride for that day`,
       );
     }
 
@@ -87,18 +116,22 @@ export class BookingsService {
       .exists({
         rideId: input.rideId,
         passengerId,
+        travelDate: input.travelDate,
         status: { $in: OPEN_STATUSES },
       })
       .exec();
     if (alreadyBooked) {
-      throw new ConflictException('You already have a booking on this ride');
+      throw new ConflictException(
+        'You already have a booking on this ride for that day',
+      );
     }
 
-    // seats are only taken when the driver accepts, not at request time
+    // seats only count once the driver accepts, not at request time
     const booking = await new this.bookingModel({
       rideId: input.rideId,
       passengerId,
       seatsRequested: input.seatsRequested,
+      travelDate: input.travelDate,
       status: BookingStatus.REQUESTED,
       requestedAt: new Date(),
     }).save();
@@ -125,11 +158,13 @@ export class BookingsService {
       throw new ConflictException('Only pending requests can be accepted');
     }
 
-    const reserved = await this.ridesService.reserveSeats(
+    // counted after the claim, so two accepts at once see each other and can't overbook
+    const ride = await this.ridesService.getRideOrThrow(String(booking.rideId));
+    const taken = await this.seatsTaken(
       String(booking.rideId),
-      booking.seatsRequested,
+      booking.travelDate,
     );
-    if (!reserved) {
+    if (ride.status !== RideStatus.ACTIVE || taken > ride.seatsAvailable) {
       // no transactions on this database, so undo the claim by hand
       await this.bookingModel
         .updateOne(
@@ -140,11 +175,107 @@ export class BookingsService {
           },
         )
         .exec();
-      throw new ConflictException('Not enough seats left on this ride');
+      throw new ConflictException(
+        'Not enough seats left on this ride for that day',
+      );
     }
 
     await this.notifier.answered(booking, true);
     return serializeBooking(booking);
+  }
+
+  // the days a passenger can book this ride for, with seats left on each
+  async listTravelDays(rideId: string): Promise<TravelDayView[]> {
+    const ride = await this.ridesService.getRideOrThrow(rideId);
+    const days: TravelDayView[] = [];
+    for (const date of upcomingTravelDates(ride, new Date())) {
+      if (await this.tripStarted(rideId, date)) continue;
+      const taken = await this.seatsTaken(rideId, date);
+      days.push({ date, seatsLeft: Math.max(0, ride.seatsAvailable - taken) });
+    }
+    return days;
+  }
+
+  // once that day's trip has started (or finished), the day is closed for booking
+  private async tripStarted(rideId: string, date: string): Promise<boolean> {
+    return (await this.tripModel.exists({ rideId, date }).exec()) !== null;
+  }
+
+  // one ride's bookings on one day, in the order the driver accepted them
+  async findForDay(
+    rideId: string,
+    date: string,
+    statuses: BookingStatus[],
+  ): Promise<BookingDocument[]> {
+    return this.bookingModel
+      .find({ rideId, travelDate: date, status: { $in: statuses } })
+      .sort({ respondedAt: 1 })
+      .exec();
+  }
+
+  // a passenger's accepted bookings for one day, with their PIN
+  async findAcceptedForPassenger(
+    passengerId: string,
+    date: string,
+  ): Promise<BookingDocument[]> {
+    return this.bookingModel
+      .find(
+        { passengerId, travelDate: date, status: BookingStatus.ACCEPTED },
+        '+pickupPin',
+      )
+      .exec();
+  }
+
+  // the trip has left, so requests nobody answered are declined
+  async declinePendingForDay(
+    rideId: string,
+    date: string,
+  ): Promise<BookingDocument[]> {
+    const pending = await this.findForDay(rideId, date, [
+      BookingStatus.REQUESTED,
+    ]);
+    await this.bookingModel
+      .updateMany(
+        {
+          _id: { $in: pending.map((booking) => booking.id) },
+          status: BookingStatus.REQUESTED,
+        },
+        { $set: { status: BookingStatus.REJECTED, respondedAt: new Date() } },
+      )
+      .exec();
+    return pending;
+  }
+
+  // the trip finished without these passengers on board
+  async markNotPickedUp(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    await this.bookingModel
+      .updateMany(
+        {
+          _id: { $in: ids },
+          status: BookingStatus.ACCEPTED,
+          pickupVerifiedAt: { $exists: false },
+        },
+        { $set: { status: BookingStatus.NOT_PICKED_UP } },
+      )
+      .exec();
+  }
+
+  // seats held on one day of a ride; the ride's seatsAvailable is what's offered each day
+  private async seatsTaken(
+    rideId: string,
+    travelDate: string | undefined,
+  ): Promise<number> {
+    const bookings = await this.bookingModel
+      .find({
+        rideId,
+        // null also matches old bookings with no date, so they share one count
+        travelDate: travelDate ?? null,
+        status: { $in: [BookingStatus.ACCEPTED, BookingStatus.COMPLETED] },
+      })
+      .select('seatsRequested')
+      .exec();
+    return bookings.reduce((sum, booking) => sum + booking.seatsRequested, 0);
   }
 
   async reject(id: string): Promise<BookingView> {
@@ -178,10 +309,6 @@ export class BookingsService {
     }
 
     if (booking.status === BookingStatus.ACCEPTED) {
-      await this.ridesService.releaseSeats(
-        String(booking.rideId),
-        booking.seatsRequested,
-      );
       // backing out of an accepted booking lowers the canceller's Trust Score
       await this.trustScoreUpdater.recalculate(cancelledBy);
       // withdrawing an unanswered request doesn't email anyone, this does
@@ -194,6 +321,33 @@ export class BookingsService {
 
   // the driver types the PIN the passenger shows them at pickup (FR13)
   async verifyPickup(id: string, pin: string): Promise<BookingView> {
+    const existing = await this.bookingModel.findById(id).exec();
+    const skipWindow = this.configService.get('skipPickupWindow', {
+      infer: true,
+    });
+    if (existing && !skipWindow) {
+      if (
+        existing.travelDate &&
+        existing.travelDate !== colomboDateString(new Date())
+      ) {
+        throw new ConflictException(
+          'The PIN can only be checked on the day of the trip',
+        );
+      }
+      const ride = await this.ridesService.getRideOrThrow(
+        String(existing.rideId),
+      );
+      const windowMinutes = this.configService.get('pickupWindowMinutes', {
+        infer: true,
+      });
+      // 409, not 400: the app shows every 400 here as "Wrong PIN"
+      if (!isWithinPickupWindow(ride, new Date(), windowMinutes)) {
+        throw new ConflictException(
+          `The PIN can only be checked within ${windowMinutes} minutes of departure`,
+        );
+      }
+    }
+
     // one conditional update, so the PIN check and the save can't be split
     const booking = await this.bookingModel
       .findOneAndUpdate(
@@ -245,9 +399,7 @@ export class BookingsService {
       );
     }
 
-    // rides repeat every week, so the seat is free for the next booking
     const ride = await this.ridesService.getRideOrThrow(String(booking.rideId));
-    await this.ridesService.releaseSeats(ride.id, booking.seatsRequested);
 
     // a completed ride counts towards both people's Trust Score
     await this.trustScoreUpdater.recalculate(String(booking.passengerId));

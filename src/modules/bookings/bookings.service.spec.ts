@@ -1,7 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, ConflictException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { getModelToken } from '@nestjs/mongoose';
-import { BookingStatus, RideStatus } from '../../common/constants';
+import { BookingStatus, RideStatus, Weekday } from '../../common/constants';
 import { RidesService } from '../rides/rides.service';
 import { TrustScoreUpdater } from '../trust-score/trust-score.updater';
 import { UsersService } from '../users/users.service';
@@ -9,12 +10,15 @@ import { BookingsService, generatePickupPin } from './bookings.service';
 import { BookingSide } from './dto/list-my-bookings-query.dto';
 import { BookingNotifier } from './notifications/booking-notifier';
 import { Review } from '../reviews/schemas/review.schema';
+import { Trip } from '../trips/schemas/trip.schema';
 import { Booking } from './schemas/booking.schema';
+import { colomboDateString } from './travel-date';
 
 interface MockBookingModel {
   (doc: Record<string, unknown>): { save: jest.Mock };
   exists: jest.Mock;
   find: jest.Mock;
+  findById: jest.Mock;
   findOneAndUpdate: jest.Mock;
   updateOne: jest.Mock;
 }
@@ -26,14 +30,17 @@ const query = (value: unknown) => ({
   exec: jest.fn().mockResolvedValue(value),
 });
 
+// what find().select().exec() returns when counting seats taken on a day
+const seatsHeld = (seats: number[]) => ({
+  select: () => query(seats.map((seatsRequested) => ({ seatsRequested }))),
+});
+
 describe('BookingsService', () => {
   let service: BookingsService;
   let bookingModel: MockBookingModel;
   let ridesService: {
     getRideOrThrow: jest.Mock;
     findRideIdsByDriver: jest.Mock;
-    reserveSeats: jest.Mock;
-    releaseSeats: jest.Mock;
   };
   let usersService: { getPublicProfile: jest.Mock };
   let trustScoreUpdater: { recalculate: jest.Mock };
@@ -43,6 +50,8 @@ describe('BookingsService', () => {
     cancelled: jest.Mock;
   };
   let reviewModel: { exists: jest.Mock };
+  // no trip has started unless a test says so
+  let tripModel: { exists: jest.Mock };
   let lastSaved: Record<string, unknown> | undefined;
 
   const rideDoc = (overrides: Record<string, unknown> = {}) => ({
@@ -75,7 +84,9 @@ describe('BookingsService', () => {
       return { save: jest.fn().mockResolvedValue(bookingDoc(doc)) };
     }) as unknown as MockBookingModel;
     ctor.exists = jest.fn().mockReturnValue(query(null));
-    ctor.find = jest.fn();
+    // seats taken on a day: none unless a test says otherwise
+    ctor.find = jest.fn().mockReturnValue(seatsHeld([]));
+    ctor.findById = jest.fn().mockReturnValue(query(null));
     ctor.findOneAndUpdate = jest.fn();
     ctor.updateOne = jest.fn().mockReturnValue(query({}));
     bookingModel = ctor;
@@ -83,8 +94,6 @@ describe('BookingsService', () => {
     ridesService = {
       getRideOrThrow: jest.fn().mockResolvedValue(rideDoc()),
       findRideIdsByDriver: jest.fn(),
-      reserveSeats: jest.fn(),
-      releaseSeats: jest.fn(),
     };
     usersService = { getPublicProfile: jest.fn() };
     trustScoreUpdater = { recalculate: jest.fn() };
@@ -94,16 +103,26 @@ describe('BookingsService', () => {
       cancelled: jest.fn(),
     };
     reviewModel = { exists: jest.fn().mockReturnValue(query(null)) };
+    tripModel = { exists: jest.fn().mockReturnValue(query(null)) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         BookingsService,
         { provide: getModelToken(Booking.name), useValue: bookingModel },
         { provide: getModelToken(Review.name), useValue: reviewModel },
+        { provide: getModelToken(Trip.name), useValue: tripModel },
         { provide: RidesService, useValue: ridesService },
         { provide: UsersService, useValue: usersService },
         { provide: TrustScoreUpdater, useValue: trustScoreUpdater },
         { provide: BookingNotifier, useValue: notifier },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn((key: string) =>
+              key === 'pickupWindowMinutes' ? 60 : undefined,
+            ),
+          },
+        },
       ],
     }).compile();
 
@@ -111,7 +130,24 @@ describe('BookingsService', () => {
   });
 
   describe('request', () => {
-    const input = { rideId: RIDE_ID, seatsRequested: 2 };
+    // Thu 19 Nov 2026
+    const input = {
+      rideId: RIDE_ID,
+      seatsRequested: 2,
+      travelDate: '2026-11-19',
+    };
+
+    beforeEach(() => {
+      // "today" is Wed 18 Nov 2026 in Colombo
+      jest.useFakeTimers({ now: new Date('2026-11-18T07:00:00+05:30') });
+      ridesService.getRideOrThrow.mockResolvedValue(
+        rideDoc({ daysOfWeek: [Weekday.WED, Weekday.THU] }),
+      );
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
 
     it('saves a requested booking without taking seats yet', async () => {
       const result = await service.request('passenger-1', input);
@@ -120,9 +156,9 @@ describe('BookingsService', () => {
         rideId: RIDE_ID,
         passengerId: 'passenger-1',
         seatsRequested: 2,
+        travelDate: '2026-11-19',
         status: BookingStatus.REQUESTED,
       });
-      expect(ridesService.reserveSeats).not.toHaveBeenCalled();
       expect(result.status).toBe(BookingStatus.REQUESTED);
       expect(notifier.requested).toHaveBeenCalled();
     });
@@ -143,32 +179,118 @@ describe('BookingsService', () => {
       );
     });
 
-    it('rejects more seats than the ride has left', async () => {
-      ridesService.getRideOrThrow.mockResolvedValue(
-        rideDoc({ seatsAvailable: 1 }),
-      );
+    it('rejects a day whose trip has already left', async () => {
+      tripModel.exists.mockReturnValue(query({ _id: 'trip-1' }));
 
       await expect(service.request('passenger-1', input)).rejects.toThrow(
-        'Only 1 seat(s) left on this ride',
+        'This ride has already left that day',
+      );
+      expect(bookingModel).not.toHaveBeenCalled();
+    });
+
+    it("rejects a day the ride doesn't run", async () => {
+      await expect(
+        service.request('passenger-1', { ...input, travelDate: '2026-11-20' }),
+      ).rejects.toThrow('Pick a day this ride runs, within the next 7 days');
+      expect(bookingModel).not.toHaveBeenCalled();
+    });
+
+    it('rejects more seats than are left on that day', async () => {
+      // 3 offered, 2 already accepted for Thursday
+      bookingModel.find.mockReturnValue(seatsHeld([2]));
+
+      await expect(service.request('passenger-1', input)).rejects.toThrow(
+        'Only 1 seat(s) left on this ride for that day',
+      );
+      expect(bookingModel.find).toHaveBeenCalledWith(
+        expect.objectContaining({ rideId: RIDE_ID, travelDate: '2026-11-19' }),
       );
     });
 
-    it('rejects a second open booking on the same ride', async () => {
+    it("doesn't count another day's bookings", async () => {
+      // Wednesday is full, but Thursday has nothing booked yet
+      bookingModel.find.mockImplementation((filter: { travelDate: string }) =>
+        seatsHeld(filter.travelDate === '2026-11-18' ? [3] : []),
+      );
+
+      await expect(
+        service.request('passenger-1', input),
+      ).resolves.toMatchObject({ status: BookingStatus.REQUESTED });
+    });
+
+    it('rejects a second open booking on the same ride and day', async () => {
       bookingModel.exists.mockReturnValue(query({ _id: 'existing' }));
 
       await expect(service.request('passenger-1', input)).rejects.toThrow(
         ConflictException,
       );
+      expect(bookingModel.exists).toHaveBeenCalledWith(
+        expect.objectContaining({ travelDate: '2026-11-19' }),
+      );
       expect(bookingModel).not.toHaveBeenCalled();
     });
   });
 
-  describe('accept', () => {
-    it('claims a pending request, then reserves the seats', async () => {
-      bookingModel.findOneAndUpdate.mockReturnValue(
-        query(bookingDoc({ status: BookingStatus.ACCEPTED })),
+  describe('listTravelDays', () => {
+    beforeEach(() => {
+      // Wed 18 Nov 2026 in Colombo
+      jest.useFakeTimers({ now: new Date('2026-11-18T07:00:00+05:30') });
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('gives seats left for each day the ride runs', async () => {
+      ridesService.getRideOrThrow.mockResolvedValue(
+        rideDoc({ daysOfWeek: [Weekday.WED, Weekday.THU] }),
       );
-      ridesService.reserveSeats.mockResolvedValue(true);
+      // 3 offered; Wednesday is full, Thursday has 1 taken
+      bookingModel.find.mockImplementation((filter: { travelDate: string }) =>
+        seatsHeld(
+          filter.travelDate === '2026-11-18'
+            ? [3]
+            : filter.travelDate === '2026-11-19'
+              ? [1]
+              : [],
+        ),
+      );
+
+      const days = await service.listTravelDays(RIDE_ID);
+
+      expect(days).toEqual([
+        { date: '2026-11-18', seatsLeft: 0 },
+        { date: '2026-11-19', seatsLeft: 2 },
+        { date: '2026-11-25', seatsLeft: 3 },
+      ]);
+    });
+
+    it("leaves out today once today's trip has started", async () => {
+      ridesService.getRideOrThrow.mockResolvedValue(
+        rideDoc({ daysOfWeek: [Weekday.WED, Weekday.THU] }),
+      );
+      tripModel.exists.mockImplementation((filter: { date: string }) =>
+        query(filter.date === '2026-11-18' ? { _id: 'trip-1' } : null),
+      );
+
+      const days = await service.listTravelDays(RIDE_ID);
+
+      expect(days.map((day) => day.date)).toEqual(['2026-11-19', '2026-11-25']);
+    });
+  });
+
+  describe('accept', () => {
+    it('claims a pending request when the day still has room', async () => {
+      bookingModel.findOneAndUpdate.mockReturnValue(
+        query(
+          bookingDoc({
+            status: BookingStatus.ACCEPTED,
+            travelDate: '2026-11-19',
+          }),
+        ),
+      );
+      // this booking's 2 seats, out of 3 offered
+      bookingModel.find.mockReturnValue(seatsHeld([2]));
 
       const result = await service.accept('booking-1');
 
@@ -181,7 +303,10 @@ describe('BookingsService', () => {
         status: BookingStatus.REQUESTED,
       });
       expect(update.$set.pickupPin).toMatch(/^\d{4}$/);
-      expect(ridesService.reserveSeats).toHaveBeenCalledWith(RIDE_ID, 2);
+      expect(bookingModel.find).toHaveBeenCalledWith(
+        expect.objectContaining({ rideId: RIDE_ID, travelDate: '2026-11-19' }),
+      );
+      expect(bookingModel.updateOne).not.toHaveBeenCalled();
       expect(result.status).toBe(BookingStatus.ACCEPTED);
       expect(notifier.answered).toHaveBeenCalledWith(expect.anything(), true);
     });
@@ -192,17 +317,18 @@ describe('BookingsService', () => {
       await expect(service.accept('booking-1')).rejects.toThrow(
         ConflictException,
       );
-      expect(ridesService.reserveSeats).not.toHaveBeenCalled();
+      expect(bookingModel.find).not.toHaveBeenCalled();
     });
 
-    it('puts the request back to pending when the seats are gone', async () => {
+    it('puts the request back to pending when the day is over-full', async () => {
       bookingModel.findOneAndUpdate.mockReturnValue(
         query(bookingDoc({ status: BookingStatus.ACCEPTED })),
       );
-      ridesService.reserveSeats.mockResolvedValue(false);
+      // this booking's 2 seats + 2 already accepted = 4, but only 3 offered
+      bookingModel.find.mockReturnValue(seatsHeld([2, 2]));
 
       await expect(service.accept('booking-1')).rejects.toThrow(
-        'Not enough seats left on this ride',
+        'Not enough seats left on this ride for that day',
       );
       // the passenger isn't told about an accept that was rolled back
       expect(notifier.answered).not.toHaveBeenCalled();
@@ -238,7 +364,7 @@ describe('BookingsService', () => {
   });
 
   describe('cancel', () => {
-    it('gives the seats back when an accepted booking is cancelled', async () => {
+    it('cancels an accepted booking and tells the other person', async () => {
       bookingModel.findOneAndUpdate.mockReturnValue(
         query(bookingDoc({ status: BookingStatus.ACCEPTED })),
       );
@@ -250,7 +376,6 @@ describe('BookingsService', () => {
         { $set: Record<string, unknown> },
       ];
       expect(update.$set.cancelledBy).toBe('passenger-1');
-      expect(ridesService.releaseSeats).toHaveBeenCalledWith(RIDE_ID, 2);
       expect(trustScoreUpdater.recalculate).toHaveBeenCalledWith('passenger-1');
       expect(result.status).toBe(BookingStatus.CANCELLED);
       expect(notifier.cancelled).toHaveBeenCalledWith(
@@ -259,12 +384,11 @@ describe('BookingsService', () => {
       );
     });
 
-    it('does not touch seats when a pending request is cancelled', async () => {
+    it('withdraws a pending request quietly', async () => {
       bookingModel.findOneAndUpdate.mockReturnValue(query(bookingDoc()));
 
       await service.cancel('booking-1', 'passenger-1');
 
-      expect(ridesService.releaseSeats).not.toHaveBeenCalled();
       // withdrawing an unanswered request doesn't affect Trust Score
       expect(trustScoreUpdater.recalculate).not.toHaveBeenCalled();
       expect(notifier.cancelled).not.toHaveBeenCalled();
@@ -288,6 +412,71 @@ describe('BookingsService', () => {
   });
 
   describe('verifyPickup', () => {
+    beforeEach(() => {
+      bookingModel.findById.mockReturnValue(
+        query(bookingDoc({ status: BookingStatus.ACCEPTED })),
+      );
+      // departs right now, every day, so the time window is open
+      ridesService.getRideOrThrow.mockResolvedValue(
+        rideDoc({
+          departureTime: new Date(),
+          daysOfWeek: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+        }),
+      );
+    });
+
+    it('refuses outside the pickup time window, before checking the PIN', async () => {
+      ridesService.getRideOrThrow.mockResolvedValue(
+        rideDoc({ departureTime: new Date('2099-01-01T02:00:00Z') }),
+      );
+
+      const result = service.verifyPickup('booking-1', '4821');
+      await expect(result).rejects.toThrow(ConflictException);
+      await expect(result).rejects.toThrow(
+        'The PIN can only be checked within 60 minutes of departure',
+      );
+      expect(bookingModel.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('refuses on a different day from the one booked', async () => {
+      const tomorrow = colomboDateString(
+        new Date(Date.now() + 24 * 60 * 60 * 1000),
+      );
+      bookingModel.findById.mockReturnValue(
+        query(
+          bookingDoc({ status: BookingStatus.ACCEPTED, travelDate: tomorrow }),
+        ),
+      );
+
+      await expect(service.verifyPickup('booking-1', '4821')).rejects.toThrow(
+        'The PIN can only be checked on the day of the trip',
+      );
+      expect(bookingModel.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('allows the PIN on the day booked', async () => {
+      bookingModel.findById.mockReturnValue(
+        query(
+          bookingDoc({
+            status: BookingStatus.ACCEPTED,
+            travelDate: colomboDateString(new Date()),
+          }),
+        ),
+      );
+      bookingModel.findOneAndUpdate.mockReturnValue(
+        query(
+          bookingDoc({
+            status: BookingStatus.ACCEPTED,
+            pickupVerifiedAt: new Date(),
+          }),
+        ),
+      );
+
+      const result = await service.verifyPickup('booking-1', '4821');
+
+      expect(result.pickupVerifiedAt).toBeInstanceOf(Date);
+    });
+
     it('records the pickup when the PIN is right', async () => {
       bookingModel.findOneAndUpdate.mockReturnValue(
         query(
@@ -331,7 +520,7 @@ describe('BookingsService', () => {
   });
 
   describe('complete', () => {
-    it('completes an accepted booking and frees the seats', async () => {
+    it('completes an accepted booking', async () => {
       bookingModel.findOneAndUpdate.mockReturnValue(
         query(bookingDoc({ status: BookingStatus.COMPLETED })),
       );
@@ -344,7 +533,6 @@ describe('BookingsService', () => {
       // can't complete a ride the passenger was never picked up for
       expect(filter).toMatchObject({ pickupVerifiedAt: { $exists: true } });
 
-      expect(ridesService.releaseSeats).toHaveBeenCalledWith(RIDE_ID, 2);
       expect(trustScoreUpdater.recalculate).toHaveBeenCalledWith('passenger-1');
       expect(trustScoreUpdater.recalculate).toHaveBeenCalledWith('driver-1');
       expect(result.status).toBe(BookingStatus.COMPLETED);

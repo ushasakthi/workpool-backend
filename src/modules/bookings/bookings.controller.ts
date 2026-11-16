@@ -21,6 +21,7 @@ import { BookingsService } from './bookings.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { ListMyBookingsQueryDto } from './dto/list-my-bookings-query.dto';
 import { SavingsQueryDto } from './dto/savings-query.dto';
+import { TravelDaysQueryDto } from './dto/travel-days-query.dto';
 import { VerifyPickupDto } from './dto/verify-pickup.dto';
 import { BookingDriverGuard } from './guards/booking-driver.guard';
 import { BookingParticipantGuard } from './guards/booking-participant.guard';
@@ -52,6 +53,15 @@ export class BookingsController {
     @Query() query: ListMyBookingsQueryDto,
   ) {
     return this.bookingsService.listMine(user.userId, query.as, query.status);
+  }
+
+  @ApiOperation({
+    summary: 'Days a ride can be booked for (next 7 days), with seats left',
+  })
+  @UseGuards(JwtAuthGuard)
+  @Get('days')
+  listTravelDays(@Query() query: TravelDaysQueryDto) {
+    return this.bookingsService.listTravelDays(query.rideId);
   }
 
   @ApiOperation({

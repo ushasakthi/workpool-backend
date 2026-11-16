@@ -36,6 +36,10 @@ export class Booking {
   @Prop({ required: true, min: 1 })
   seatsRequested!: number;
 
+  // the day of the trip, "2026-11-18" in Colombo time; missing on bookings made before dates existed
+  @Prop()
+  travelDate?: string;
+
   @Prop({ required: true })
   requestedAt!: Date;
 

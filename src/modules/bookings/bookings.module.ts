@@ -4,6 +4,7 @@ import { MailModule } from '../mail/mail.module';
 import { PushModule } from '../push/push.module';
 import { Review, ReviewSchema } from '../reviews/schemas/review.schema';
 import { RidesModule } from '../rides/rides.module';
+import { Trip, TripSchema } from '../trips/schemas/trip.schema';
 import { TrustScoreModule } from '../trust-score/trust-score.module';
 import { UsersModule } from '../users/users.module';
 import { BookingsController } from './bookings.controller';
@@ -15,10 +16,11 @@ import { Booking, BookingSchema } from './schemas/booking.schema';
 
 @Module({
   imports: [
-    // Review is only read here (reviewedByMe); ReviewsModule owns writing it
+    // Review and Trip are only read here; their own modules write them
     MongooseModule.forFeature([
       { name: Booking.name, schema: BookingSchema },
       { name: Review.name, schema: ReviewSchema },
+      { name: Trip.name, schema: TripSchema },
     ]),
     RidesModule,
     UsersModule,

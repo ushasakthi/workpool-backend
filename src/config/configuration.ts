@@ -12,6 +12,8 @@ export interface AppConfig {
   };
   corsOrigins: string[];
   encryptionKey: string;
+  pickupWindowMinutes: number;
+  skipPickupWindow: boolean;
   uploads: {
     nicDocumentDir: string;
     profilePhotoDir: string;
@@ -43,6 +45,11 @@ export default (): AppConfig => ({
     .map((origin) => origin.trim())
     .filter(Boolean),
   encryptionKey: process.env.ENCRYPTION_KEY!,
+  pickupWindowMinutes: parseInt(process.env.PICKUP_WINDOW_MINUTES ?? '60', 10),
+  // never on in production, even if the flag is left in .env
+  skipPickupWindow:
+    (process.env.NODE_ENV ?? 'development') === 'development' &&
+    process.env.SKIP_PICKUP_WINDOW === 'true',
   uploads: {
     nicDocumentDir: process.env.NIC_UPLOAD_DIR ?? './storage/nic-documents',
     profilePhotoDir:

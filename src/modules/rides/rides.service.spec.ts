@@ -376,37 +376,4 @@ describe('RidesService', () => {
       expect(rideModel.findById).not.toHaveBeenCalled();
     });
   });
-
-  describe('reserveSeats', () => {
-    it('only takes seats from an active ride that still has enough', async () => {
-      const findOneAndUpdate = jest.fn().mockReturnValue({
-        exec: jest.fn().mockResolvedValue(rideDoc()),
-      });
-      (
-        rideModel as unknown as { findOneAndUpdate: jest.Mock }
-      ).findOneAndUpdate = findOneAndUpdate;
-
-      const reserved = await service.reserveSeats(VEHICLE_ID, 2);
-
-      expect(findOneAndUpdate).toHaveBeenCalledWith(
-        {
-          _id: VEHICLE_ID,
-          status: RideStatus.ACTIVE,
-          seatsAvailable: { $gte: 2 },
-        },
-        { $inc: { seatsAvailable: -2 } },
-      );
-      expect(reserved).toBe(true);
-    });
-
-    it('returns false when the seats are already gone', async () => {
-      (
-        rideModel as unknown as { findOneAndUpdate: jest.Mock }
-      ).findOneAndUpdate = jest
-        .fn()
-        .mockReturnValue({ exec: jest.fn().mockResolvedValue(null) });
-
-      await expect(service.reserveSeats(VEHICLE_ID, 2)).resolves.toBe(false);
-    });
-  });
 });

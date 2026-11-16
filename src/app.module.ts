@@ -11,6 +11,7 @@ import { AdminModule } from './modules/admin/admin.module';
 import { VehiclesModule } from './modules/vehicles/vehicles.module';
 import { RidesModule } from './modules/rides/rides.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
+import { TripsModule } from './modules/trips/trips.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { SosModule } from './modules/sos/sos.module';
@@ -40,6 +41,7 @@ import { GeocodeModule } from './modules/geocode/geocode.module';
     VehiclesModule,
     RidesModule,
     BookingsModule,
+    TripsModule,
     ReviewsModule,
     ReportsModule,
     SosModule,

@@ -13,6 +13,9 @@ export const validationSchema = Joi.object({
   CORS_ORIGINS: Joi.string().default(''),
   // 64 hex chars, used to encrypt nicNumber
   ENCRYPTION_KEY: Joi.string().hex().length(64).required(),
+  // testing only: widen the pickup PIN window; 1440 = any time on a ride day
+  PICKUP_WINDOW_MINUTES: Joi.number().integer().min(1).max(1440).default(60),
+  SKIP_PICKUP_WINDOW: Joi.string().valid('true', 'false').default('false'),
   NIC_UPLOAD_DIR: Joi.string().default('./storage/nic-documents'),
   PROFILE_PHOTO_DIR: Joi.string().default('./storage/profile-photos'),
   VEHICLE_PHOTO_DIR: Joi.string().default('./storage/vehicle-photos'),

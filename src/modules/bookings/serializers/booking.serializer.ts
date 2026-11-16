@@ -8,9 +8,11 @@ export interface BookingView {
   passengerId: string;
   status: BookingStatus;
   seatsRequested: number;
+  travelDate?: string;
   requestedAt: Date;
   respondedAt?: Date;
   pickupVerifiedAt?: Date;
+  completedAt?: Date;
 }
 
 // a booking in a list, with enough of the ride and the other person to show a card
@@ -46,8 +48,10 @@ export function serializeBooking(booking: BookingDocument): BookingView {
     passengerId: String(booking.passengerId),
     status: booking.status,
     seatsRequested: booking.seatsRequested,
+    travelDate: booking.travelDate,
     requestedAt: booking.requestedAt,
     respondedAt: booking.respondedAt,
     pickupVerifiedAt: booking.pickupVerifiedAt,
+    completedAt: booking.completedAt,
   };
 }
