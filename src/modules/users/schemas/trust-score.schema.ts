@@ -20,6 +20,10 @@ export class TrustScore {
   @Prop({ default: 0 })
   complaintCount!: number;
 
+  // reports an admin reviewed and upheld; safe to show publicly, unlike complaintCount
+  @Prop({ default: 0 })
+  upheldComplaints!: number;
+
   // 0-100, null until it's been calculated once
   @Prop({ type: Number, default: null })
   score!: number | null;

@@ -182,6 +182,8 @@ describe('UsersService', () => {
           completedRides: 0,
           ratingCount: 0,
           averageRating: 0,
+          cancellationCount: 0,
+          upheldComplaints: 0,
         },
       });
     });

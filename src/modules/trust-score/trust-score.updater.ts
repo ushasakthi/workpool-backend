@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { BookingStatus, VerificationStatus } from '../../common/constants';
+import {
+  BookingStatus,
+  ReportStatus,
+  VerificationStatus,
+} from '../../common/constants';
 import { Booking, BookingDocument } from '../bookings/schemas/booking.schema';
 import { Report, ReportDocument } from '../reports/schemas/report.schema';
 import { Review, ReviewDocument } from '../reviews/schemas/review.schema';
@@ -15,6 +19,7 @@ interface History {
   averageRating: number;
   cancellationCount: number;
   complaintCount: number;
+  upheldComplaints: number;
 }
 
 // Recounts a user's history from the real collections and caches a fresh
@@ -104,6 +109,10 @@ export class TrustScoreUpdater {
       (sum, report) => sum + complaintWeight(report.status, report.severity),
       0,
     );
+    // open reports are left out so the count can't reveal a fresh report
+    const upheldComplaints = reports.filter(
+      (report) => report.status === ReportStatus.REVIEWED,
+    ).length;
 
     return {
       completedRides,
@@ -111,6 +120,7 @@ export class TrustScoreUpdater {
       averageRating: ratings?.average ?? 0,
       cancellationCount,
       complaintCount,
+      upheldComplaints,
     };
   }
 }

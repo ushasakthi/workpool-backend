@@ -130,6 +130,25 @@ describe('TrustScoreUpdater', () => {
     expect(update.$set.trustScore).toMatchObject({ complaintCount: 4 });
   });
 
+  it('counts only reviewed reports as upheld complaints', async () => {
+    reportModel.find.mockReturnValue(
+      query([
+        { status: ReportStatus.OPEN },
+        { status: ReportStatus.REVIEWED, severity: ReportSeverity.LOW },
+        { status: ReportStatus.REVIEWED, severity: ReportSeverity.HIGH },
+        { status: ReportStatus.DISMISSED },
+      ]),
+    );
+
+    await updater.recalculate(USER_ID);
+
+    const [, update] = userModel.updateOne.mock.calls[0] as [
+      unknown,
+      { $set: { trustScore: Record<string, unknown> } },
+    ];
+    expect(update.$set.trustScore).toMatchObject({ upheldComplaints: 2 });
+  });
+
   it('treats no reviews as no ratings yet', async () => {
     reviewModel.aggregate.mockReturnValue(query([]));
 

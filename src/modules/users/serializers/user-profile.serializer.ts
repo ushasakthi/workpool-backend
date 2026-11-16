@@ -32,14 +32,16 @@ export interface TravelProfileView {
   approximate: boolean;
 }
 
-// the public part of the Trust Score: cancellation and complaint counts stay
-// private, because complaints come from confidential reports
+// the public part of the Trust Score. The raw complaintCount stays private
+// (it includes open reports, so it could reveal who just reported someone)
 export interface TrustScoreView {
   // 0-100, null until calculated
   score: number | null;
   completedRides: number;
   ratingCount: number;
   averageRating: number;
+  cancellationCount: number;
+  upheldComplaints: number;
 }
 
 export interface PublicUserProfile {
@@ -119,6 +121,8 @@ function serializeTrustScore(user: UserDocument): TrustScoreView {
     completedRides: trust?.completedRides ?? 0,
     ratingCount: trust?.ratingCount ?? 0,
     averageRating: trust?.averageRating ?? 0,
+    cancellationCount: trust?.cancellationCount ?? 0,
+    upheldComplaints: trust?.upheldComplaints ?? 0,
   };
 }
 
