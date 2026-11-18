@@ -22,6 +22,7 @@ import { RidesService } from '../rides/rides.service';
 import { RideDocument } from '../rides/schemas/ride.schema';
 import { UsersService } from '../users/users.service';
 import { VehiclesService } from '../vehicles/vehicles.service';
+import { dropOffPoint } from './drop-off';
 import { TripNotifier } from './notifications/trip-notifier';
 import { Trip, TripDocument } from './schemas/trip.schema';
 import {
@@ -276,26 +277,38 @@ export class TripsService {
       trip.date,
       [BookingStatus.ACCEPTED, BookingStatus.COMPLETED],
     );
-    const stops: TripStopView[] = [];
+    const stops: { stop: TripStopView; kmFromStart: number }[] = [];
     for (const booking of bookings) {
+      // the driver sees approximate places, and never a rider's home name
       const passenger = await this.usersService.getPublicProfile(
         String(booking.passengerId),
         driverId,
       );
+      const dropOff = dropOffPoint(ride.destination, passenger.travelProfile);
       stops.push({
-        bookingId: booking.id,
-        passenger: {
-          id: passenger.id,
-          name: passenger.name,
-          trustScore: passenger.trustScore.score,
+        stop: {
+          bookingId: booking.id,
+          passenger: {
+            id: passenger.id,
+            name: passenger.name,
+            trustScore: passenger.trustScore.score,
+          },
+          seats: booking.seatsRequested,
+          pickupLabel: pickupLabel(ride),
+          dropOffLabel: dropOff.label ?? 'Ask the rider',
+          pickedUpAt: booking.pickupVerifiedAt,
+          droppedOffAt: booking.completedAt,
         },
-        seats: booking.seatsRequested,
-        pickupLabel: pickupLabel(ride),
-        pickedUpAt: booking.pickupVerifiedAt,
-        droppedOffAt: booking.completedAt,
+        kmFromStart: haversine(ride.origin, dropOff),
       });
     }
-    return { ...tripBase(trip, ride), side: 'driver', stops };
+    // everyone gets in at the start, so order by who gets out first
+    stops.sort((a, b) => a.kmFromStart - b.kmFromStart);
+    return {
+      ...tripBase(trip, ride),
+      side: 'driver',
+      stops: stops.map((item) => item.stop),
+    };
   }
 
   private async toPassengerView(
@@ -314,6 +327,11 @@ export class TripsService {
       [BookingStatus.ACCEPTED, BookingStatus.COMPLETED],
     );
     const stopIndex = onTrip.findIndex((other) => other.id === booking.id);
+    const me = await this.usersService.getPublicProfile(
+      passengerId,
+      passengerId,
+    );
+    const dropOff = dropOffPoint(ride.destination, me.travelProfile);
 
     return {
       ...tripBase(trip, ride),
@@ -332,6 +350,7 @@ export class TripsService {
         pickedUpAt: booking.pickupVerifiedAt,
       },
       pickupLabel: pickupLabel(ride),
+      dropOffLabel: dropOff.label ?? ride.destination.label ?? 'Destination',
       stopNumber: stopIndex + 1,
       stopCount: onTrip.length,
     };

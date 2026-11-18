@@ -87,6 +87,9 @@ describe('TripsService', () => {
     ...overrides,
   });
 
+  // what getPublicProfile returns for each rider's home and work (none = no travel profile)
+  let travelProfiles: Record<string, unknown>;
+
   const tripDoc = (overrides: Record<string, unknown> = {}) => ({
     id: 'trip-1',
     rideId: 'ride-1',
@@ -123,6 +126,7 @@ describe('TripsService', () => {
       findMine: jest.fn().mockResolvedValue([]),
     };
     notifier = { started: jest.fn(), rideLeft: jest.fn(), finished: jest.fn() };
+    travelProfiles = {};
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -138,6 +142,7 @@ describe('TripsService', () => {
                 id,
                 name: id === 'driver-1' ? 'Kamal Perera' : 'Nadisha Perera',
                 trustScore: { score: 80 },
+                travelProfile: travelProfiles[id],
               }),
             ),
           },
@@ -247,19 +252,57 @@ describe('TripsService', () => {
   });
 
   describe('current', () => {
-    it("shows the driver's trip with stops in pickup order", async () => {
+    it("shows the driver's stops in drop-off order, nearest the start first", async () => {
       tripModel.findOne.mockReturnValue(query(tripDoc()));
       bookingsService.findForDay.mockResolvedValue([
         booking('b1', { pickupVerifiedAt: colombo(`${TODAY}T07:52:00`) }),
         booking('b2'),
       ]);
+      // b1 works near the ride's end, b2 gets out halfway
+      travelProfiles = {
+        'passenger-b1': {
+          homeLocation: { lat: 6.861, lng: 79.899 },
+          workLocation: { lat: 6.905, lng: 79.852, label: 'Colombo 04' },
+        },
+        'passenger-b2': {
+          homeLocation: { lat: 6.859, lng: 79.901 },
+          workLocation: { lat: 6.88, lng: 79.88, label: 'Kirulapone' },
+        },
+      };
 
       const view = (await service.current('driver-1')) as DriverTripView;
 
       expect(view.side).toBe('driver');
-      expect(view.stops.map((stop) => stop.bookingId)).toEqual(['b1', 'b2']);
-      expect(view.stops[0].pickedUpAt).toBeDefined();
-      expect(view.stops[1].pickupLabel).toBe('Nugegoda');
+      expect(view.stops.map((stop) => stop.bookingId)).toEqual(['b2', 'b1']);
+      expect(view.stops.map((stop) => stop.dropOffLabel)).toEqual([
+        'Kirulapone',
+        'Colombo 04',
+      ]);
+      expect(view.stops[1].pickedUpAt).toBeDefined();
+      expect(view.stops[0].pickupLabel).toBe('Nugegoda');
+    });
+
+    it("doesn't show the driver a rider's home name", async () => {
+      tripModel.findOne.mockReturnValue(query(tripDoc()));
+      // an evening-style ride: home is nearer the ride's end; public home has no label
+      travelProfiles = {
+        'passenger-b1': {
+          homeLocation: { lat: 6.909, lng: 79.851 },
+          workLocation: { lat: 6.861, lng: 79.899, label: 'Nugegoda office' },
+        },
+      };
+
+      const view = (await service.current('driver-1')) as DriverTripView;
+
+      expect(view.stops[0].dropOffLabel).toBe('Ask the rider');
+    });
+
+    it("uses the ride's end when a rider has no travel profile", async () => {
+      tripModel.findOne.mockReturnValue(query(tripDoc()));
+
+      const view = (await service.current('driver-1')) as DriverTripView;
+
+      expect(view.stops[0].dropOffLabel).toBe('Colombo 03');
     });
 
     it("shows a passenger their stop number, PIN and the driver's car", async () => {
@@ -301,6 +344,26 @@ describe('TripsService', () => {
 
       expect(view.booking.pickupPin).toBeUndefined();
       expect(view.booking.pickedUpAt).toBeDefined();
+    });
+
+    it('shows a passenger their own drop-off', async () => {
+      tripModel.findOne
+        .mockReturnValueOnce(query(null))
+        .mockReturnValueOnce(query(tripDoc()));
+      bookingsService.findAcceptedForPassenger.mockResolvedValue([
+        booking('b2'),
+      ]);
+      bookingsService.findForDay.mockResolvedValue([booking('b2')]);
+      travelProfiles = {
+        'passenger-b2': {
+          homeLocation: { lat: 6.859, lng: 79.901, label: 'Pepiliyana' },
+          workLocation: { lat: 6.905, lng: 79.852, label: 'Colombo 04' },
+        },
+      };
+
+      const view = (await service.current('passenger-b2')) as PassengerTripView;
+
+      expect(view.dropOffLabel).toBe('Colombo 04');
     });
 
     it('is null when there is no trip right now', async () => {

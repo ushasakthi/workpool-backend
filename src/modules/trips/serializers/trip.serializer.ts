@@ -21,6 +21,8 @@ export interface TripStopView {
   seats: number;
   // everyone is picked up at the ride's start until pickup spots exist
   pickupLabel: string;
+  // the rider's home or work, whichever is nearer the ride's end
+  dropOffLabel: string;
   pickedUpAt?: Date;
   droppedOffAt?: Date;
 }
@@ -37,7 +39,7 @@ interface TripBase {
 
 export interface DriverTripView extends TripBase {
   side: 'driver';
-  // in pickup order
+  // in drop-off order, nearest the start first
   stops: TripStopView[];
 }
 
@@ -55,6 +57,7 @@ export interface PassengerTripView extends TripBase {
     pickedUpAt?: Date;
   };
   pickupLabel: string;
+  dropOffLabel: string;
   stopNumber: number;
   stopCount: number;
 }
