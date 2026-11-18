@@ -311,6 +311,19 @@ describe('BookingsService', () => {
       expect(notifier.answered).toHaveBeenCalledWith(expect.anything(), true);
     });
 
+    it('refuses a request for a day that has already passed', async () => {
+      jest.useFakeTimers({ now: new Date('2026-11-18T07:00:00+05:30') });
+      bookingModel.findById.mockReturnValue(
+        query(bookingDoc({ travelDate: '2026-11-17' })),
+      );
+
+      await expect(service.accept('booking-1')).rejects.toThrow(
+        'That day has already passed',
+      );
+      expect(bookingModel.findOneAndUpdate).not.toHaveBeenCalled();
+      jest.useRealTimers();
+    });
+
     it('refuses a request that was already answered', async () => {
       bookingModel.findOneAndUpdate.mockReturnValue(query(null));
 

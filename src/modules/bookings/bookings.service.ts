@@ -140,6 +140,15 @@ export class BookingsService {
   }
 
   async accept(id: string): Promise<BookingView> {
+    // "YYYY-MM-DD" strings compare in date order
+    const pending = await this.bookingModel.findById(id).exec();
+    if (
+      pending?.travelDate &&
+      pending.travelDate < colomboDateString(new Date())
+    ) {
+      throw new ConflictException('That day has already passed');
+    }
+
     // claim the request first, the status condition means it can only be answered once
     const booking = await this.bookingModel
       .findOneAndUpdate(
