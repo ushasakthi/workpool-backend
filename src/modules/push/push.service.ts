@@ -3,6 +3,7 @@ import { Injectable, Logger } from '@nestjs/common';
 // Expo forwards the message to Firebase, which delivers it to the Android phone.
 // No API key is needed to send through Expo.
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
+const PUSH_TIMEOUT_MS = 5_000;
 
 interface ExpoPushResponse {
   data?: { status: 'ok' | 'error'; message?: string };
@@ -25,6 +26,8 @@ export class PushService {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ to: token, title, body, data, sound: 'default' }),
+      // the trip/booking answer waits for this, so a slow Expo mustn't hold it up
+      signal: AbortSignal.timeout(PUSH_TIMEOUT_MS),
     });
 
     if (!response.ok) {

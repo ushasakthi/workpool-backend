@@ -6,6 +6,8 @@ import type { Transporter } from 'nodemailer';
 import { AppConfig } from '../../config/configuration';
 import { BookingEmail, renderBookingEmail } from './templates/booking-email';
 
+const MAIL_TIMEOUT_MS = 10_000;
+
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
@@ -22,7 +24,13 @@ export class MailService {
       host: mailConfig.host,
       port: mailConfig.port,
       secure: mailConfig.secure,
-      auth: mailConfig.user ? { user: mailConfig.user, pass: mailConfig.pass } : undefined,
+      auth: mailConfig.user
+        ? { user: mailConfig.user, pass: mailConfig.pass }
+        : undefined,
+      // booking actions wait for the email, so give up on a slow mail server quickly
+      connectionTimeout: MAIL_TIMEOUT_MS,
+      greetingTimeout: MAIL_TIMEOUT_MS,
+      socketTimeout: MAIL_TIMEOUT_MS,
     });
   }
 

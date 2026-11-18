@@ -25,10 +25,12 @@ describe('PushService', () => {
 
     const [url, options] = fetchMock.mock.calls[0] as [
       string,
-      { method: string; body: string },
+      { method: string; body: string; signal?: AbortSignal },
     ];
     expect(url).toBe('https://exp.host/--/api/v2/push/send');
     expect(options.method).toBe('POST');
+    // a time limit, so a slow Expo can't hold up the caller
+    expect(options.signal).toBeInstanceOf(AbortSignal);
     expect(JSON.parse(options.body)).toMatchObject({
       to: 'ExponentPushToken[abc]',
       title: 'Title',
