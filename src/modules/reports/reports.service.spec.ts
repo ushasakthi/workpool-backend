@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   NotFoundException,
@@ -105,6 +106,21 @@ describe('ReportsService', () => {
       await expect(service.create('stranger', input)).rejects.toThrow(
         ForbiddenException,
       );
+    });
+
+    it('refuses a request the driver never accepted', async () => {
+      for (const status of [BookingStatus.REQUESTED, BookingStatus.REJECTED]) {
+        bookingsService.getParties.mockResolvedValue({
+          status,
+          passengerId: 'passenger-1',
+          driverId: 'driver-1',
+        });
+
+        await expect(service.create('passenger-1', input)).rejects.toThrow(
+          BadRequestException,
+        );
+      }
+      expect(trustScoreUpdater.recalculate).not.toHaveBeenCalled();
     });
 
     it('refuses a second open report on the same ride', async () => {

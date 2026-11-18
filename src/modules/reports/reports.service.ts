@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -8,6 +9,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model } from 'mongoose';
 import {
   AdminAction,
+  BookingStatus,
   ReportCategory,
   ReportSeverity,
   ReportStatus,
@@ -65,6 +67,15 @@ export class ReportsService {
     const parties = await this.bookingsService.getParties(input.bookingId);
     if (reporterId !== parties.passengerId && reporterId !== parties.driverId) {
       throw new ForbiddenException('You can only report your own rides');
+    }
+    // a request that was never accepted isn't a shared ride yet, so there's nothing to report
+    if (
+      parties.status === BookingStatus.REQUESTED ||
+      parties.status === BookingStatus.REJECTED
+    ) {
+      throw new BadRequestException(
+        'You can only report a ride once it has been accepted',
+      );
     }
 
     const alreadyOpen = await this.reportModel
