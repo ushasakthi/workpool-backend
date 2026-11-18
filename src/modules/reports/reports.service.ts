@@ -30,6 +30,8 @@ export interface AdminReportView {
   category: ReportCategory;
   reason?: string;
   status: ReportStatus;
+  // set when an admin upholds the report
+  severity?: ReportSeverity;
   createdAt: Date;
   resolvedAt?: Date;
   // the reporter's details are for admins only
@@ -127,6 +129,7 @@ export class ReportsService {
         category: report.category,
         reason: report.reason,
         status: report.status,
+        severity: report.severity,
         createdAt: report.createdAt,
         resolvedAt: report.resolvedAt,
         reportedBy: {

@@ -8,6 +8,8 @@ import { isValidObjectId, Model } from 'mongoose';
 import {
   AdminAction,
   BookingStatus,
+  ReportCategory,
+  ReportSeverity,
   ReportStatus,
   RideStatus,
   SAFETY_REPORT_CATEGORIES,
@@ -80,6 +82,8 @@ export interface AdminJoinedRideView {
   status: BookingStatus;
   seatsRequested: number;
   requestedAt: Date;
+  // the day of this seat, "2026-11-18"
+  travelDate?: string;
   // null if the ride was deleted
   ride: {
     origin: GeoPointView;
@@ -101,6 +105,20 @@ export interface AdminUserDetail extends AdminUserView {
   ridesOffered: RideView[];
   // as a passenger, newest first
   ridesJoined: AdminJoinedRideView[];
+  // reports filed against this user, open and decided, newest first
+  reportsAgainst: AdminUserReportView[];
+}
+
+export interface AdminUserReportView {
+  id: string;
+  category: ReportCategory;
+  reason?: string;
+  status: ReportStatus;
+  // set when an admin upholds the report
+  severity?: ReportSeverity;
+  reportedByName: string;
+  createdAt: Date;
+  resolvedAt?: Date;
 }
 
 export interface AdminStats {
@@ -223,7 +241,7 @@ export class AdminService {
       throw new NotFoundException('User not found');
     }
 
-    const [vehicles, ridesOffered, bookings] = await Promise.all([
+    const [vehicles, ridesOffered, bookings, reports] = await Promise.all([
       this.vehicleModel.find({ ownerId: userId }).exec(),
       this.rideModel
         .find({ driverId: userId })
@@ -235,7 +253,18 @@ export class AdminService {
         .sort({ requestedAt: -1 })
         .limit(TRIPS_LIMIT)
         .exec(),
+      this.reportModel
+        .find({ reportedUser: userId })
+        .sort({ createdAt: -1 })
+        .exec(),
     ]);
+
+    // one query for all the reporters' names
+    const reporters = await this.userModel
+      .find({ _id: { $in: reports.map((r) => r.reportedBy) } })
+      .select('name')
+      .exec();
+    const reporterNames = new Map(reporters.map((u) => [u.id, u.name]));
 
     // one query for all the joined rides instead of one per booking
     const joinedRides = await this.rideModel
@@ -261,6 +290,7 @@ export class AdminService {
           status: booking.status,
           seatsRequested: booking.seatsRequested,
           requestedAt: booking.requestedAt,
+          travelDate: booking.travelDate,
           ride: ride
             ? {
                 origin: toPointView(ride.origin),
@@ -271,6 +301,17 @@ export class AdminService {
             : null,
         };
       }),
+      reportsAgainst: reports.map((report) => ({
+        id: report.id,
+        category: report.category,
+        reason: report.reason,
+        status: report.status,
+        severity: report.severity,
+        reportedByName:
+          reporterNames.get(String(report.reportedBy)) ?? 'Former user',
+        createdAt: report.createdAt,
+        resolvedAt: report.resolvedAt,
+      })),
     };
   }
 

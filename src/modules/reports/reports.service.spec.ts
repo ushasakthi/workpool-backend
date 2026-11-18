@@ -270,5 +270,32 @@ describe('ReportsService', () => {
         status: ReportStatus.OPEN,
       });
     });
+
+    it('includes the severity of an upheld report, for the history', async () => {
+      reportModel.find.mockReturnValue({
+        sort: () =>
+          query([
+            {
+              id: REPORT_ID,
+              bookingId: BOOKING_ID,
+              reportedBy: 'passenger-1',
+              reportedUser: 'driver-1',
+              category: ReportCategory.NO_SHOW,
+              status: ReportStatus.REVIEWED,
+              severity: ReportSeverity.MEDIUM,
+              createdAt: new Date('2026-10-01'),
+              resolvedAt: new Date('2026-10-02'),
+            },
+          ]),
+      });
+      usersService.findContacts.mockResolvedValue(new Map());
+
+      const result = await service.listForAdmin();
+
+      expect(result[0]).toMatchObject({
+        status: ReportStatus.REVIEWED,
+        severity: ReportSeverity.MEDIUM,
+      });
+    });
   });
 });

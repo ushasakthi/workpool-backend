@@ -3,6 +3,9 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
 import {
   AdminAction,
+  ReportCategory,
+  ReportSeverity,
+  ReportStatus,
   RideStatus,
   UserRole,
   VerificationStatus,
@@ -55,7 +58,11 @@ describe('AdminService', () => {
   };
   let bookingModel: { countDocuments: jest.Mock; find: jest.Mock };
   let vehicleModel: { find: jest.Mock };
-  let reportModel: { countDocuments: jest.Mock; findOne: jest.Mock };
+  let reportModel: {
+    countDocuments: jest.Mock;
+    findOne: jest.Mock;
+    find: jest.Mock;
+  };
   let logModel: { find: jest.Mock };
   let adminLogService: { record: jest.Mock };
 
@@ -80,6 +87,7 @@ describe('AdminService', () => {
     reportModel = {
       countDocuments: jest.fn().mockReturnValue(query(0)),
       findOne: jest.fn(),
+      find: jest.fn().mockReturnValue({ sort: () => query([]) }),
     };
     logModel = { find: jest.fn() };
     adminLogService = { record: jest.fn() };
@@ -200,6 +208,7 @@ describe('AdminService', () => {
     };
 
     it('returns the profile, emergency contact, vehicles and trips', async () => {
+      userModel.find.mockReturnValue({ select: () => query([]) });
       userModel.findById.mockReturnValue(
         query(
           userDoc({
@@ -238,6 +247,7 @@ describe('AdminService', () => {
             status: 'completed',
             seatsRequested: 1,
             requestedAt: new Date('2026-10-30'),
+            travelDate: '2026-11-02',
           },
           {
             id: 'b2',
@@ -264,9 +274,59 @@ describe('AdminService', () => {
         origin: point('Home'),
         costContribution: 400,
       });
+      expect(result.ridesJoined[0].travelDate).toBe('2026-11-02');
       // the second booking's ride no longer exists
       expect(result.ridesJoined[1].ride).toBeNull();
       expect(result).not.toHaveProperty('passwordHash');
+    });
+
+    it('lists reports against the user, open and decided, with who filed them', async () => {
+      // rides offered, then the rides behind the joined bookings
+      rideModel.find
+        .mockReturnValueOnce(sortedLimited([]))
+        .mockReturnValueOnce(query([]));
+      bookingModel.find.mockReturnValue(sortedLimited([]));
+      vehicleModel.find.mockReturnValue(query([]));
+      reportModel.find.mockReturnValue({
+        sort: () =>
+          query([
+            {
+              id: 'r2',
+              reportedBy: 'reporter-1',
+              category: ReportCategory.LATE_PICKUP,
+              status: ReportStatus.OPEN,
+              createdAt: new Date('2026-11-18'),
+            },
+            {
+              id: 'r1',
+              reportedBy: 'reporter-1',
+              category: ReportCategory.NO_SHOW,
+              status: ReportStatus.REVIEWED,
+              severity: ReportSeverity.MEDIUM,
+              createdAt: new Date('2026-11-10'),
+              resolvedAt: new Date('2026-11-11'),
+            },
+          ]),
+      });
+      userModel.find.mockReturnValue({
+        select: () => query([{ id: 'reporter-1', name: 'Kamal' }]),
+      });
+
+      const result = await service.getUserDetail(USER_ID);
+
+      expect(reportModel.find).toHaveBeenCalledWith({ reportedUser: USER_ID });
+      expect(result.reportsAgainst).toEqual([
+        expect.objectContaining({
+          id: 'r2',
+          status: ReportStatus.OPEN,
+          reportedByName: 'Kamal',
+        }),
+        expect.objectContaining({
+          id: 'r1',
+          status: ReportStatus.REVIEWED,
+          severity: ReportSeverity.MEDIUM,
+        }),
+      ]);
     });
 
     it('404s on an unknown or malformed id', async () => {
