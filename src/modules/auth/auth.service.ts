@@ -148,10 +148,20 @@ export class AuthService {
       new Date(Date.now() + RESET_TOKEN_TTL_MS),
     );
 
-    await this.mailService.sendPasswordResetEmail(email, rawToken);
+    // a mail error must not change the reply, or it would show the email is registered
+    try {
+      await this.mailService.sendPasswordResetEmail(email, rawToken);
+    } catch (err) {
+      this.logger.warn(
+        `Reset email not sent: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
-  async resetPassword(token: string, newPassword: string): Promise<{ email: string }> {
+  async resetPassword(
+    token: string,
+    newPassword: string,
+  ): Promise<{ email: string }> {
     const tokenHash = this.hashResetToken(token);
     const user = await this.usersService.findByPasswordResetToken(tokenHash);
     if (!user) {

@@ -235,6 +235,30 @@ describe('AuthService', () => {
     });
   });
 
+  describe('forgotPassword', () => {
+    it('emails a reset link to a registered address', async () => {
+      usersService.findByEmail.mockResolvedValue(await buildMockUser());
+
+      await authService.forgotPassword('test@example.com');
+
+      expect(mailService.sendPasswordResetEmail).toHaveBeenCalledWith(
+        'test@example.com',
+        expect.any(String),
+      );
+    });
+
+    it('answers the same when the email fails, so it never shows the address is registered', async () => {
+      usersService.findByEmail.mockResolvedValue(await buildMockUser());
+      mailService.sendPasswordResetEmail.mockRejectedValue(
+        new Error('SMTP down'),
+      );
+
+      await expect(
+        authService.forgotPassword('test@example.com'),
+      ).resolves.toBeUndefined();
+    });
+  });
+
   describe('resetPassword', () => {
     it('rejects an invalid or expired token', async () => {
       usersService.findByPasswordResetToken.mockResolvedValue(null);
@@ -248,7 +272,10 @@ describe('AuthService', () => {
       const user = await buildMockUser();
       usersService.findByPasswordResetToken.mockResolvedValue(user);
 
-      const result = await authService.resetPassword('good-token', 'NewStrongPass1');
+      const result = await authService.resetPassword(
+        'good-token',
+        'NewStrongPass1',
+      );
 
       expect(usersService.resetPassword).toHaveBeenCalledWith(
         'user-1',
