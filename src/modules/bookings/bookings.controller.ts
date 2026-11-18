@@ -9,6 +9,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { UserRole } from '../../common/constants';
 import {
   CurrentUser,
@@ -25,6 +26,9 @@ import { TravelDaysQueryDto } from './dto/travel-days-query.dto';
 import { VerifyPickupDto } from './dto/verify-pickup.dto';
 import { BookingDriverGuard } from './guards/booking-driver.guard';
 import { BookingParticipantGuard } from './guards/booking-participant.guard';
+
+const PIN_THROTTLE_LIMIT = 5;
+const PIN_THROTTLE_TTL_MS = 60_000;
 
 @ApiTags('bookings')
 @ApiBearerAuth()
@@ -102,7 +106,11 @@ export class BookingsController {
   @ApiOperation({
     summary: "Check the passenger's pickup PIN (driver only, FR13)",
   })
-  @UseGuards(JwtAuthGuard, BookingDriverGuard)
+  // a 4-digit PIN could be guessed by trying them all, so only a few tries a minute
+  @UseGuards(JwtAuthGuard, BookingDriverGuard, ThrottlerGuard)
+  @Throttle({
+    default: { limit: PIN_THROTTLE_LIMIT, ttl: PIN_THROTTLE_TTL_MS },
+  })
   @Patch(':id/verify-pickup')
   verifyPickup(@Param('id') id: string, @Body() dto: VerifyPickupDto) {
     return this.bookingsService.verifyPickup(id, dto.pin);
