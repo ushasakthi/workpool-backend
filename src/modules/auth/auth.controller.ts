@@ -6,7 +6,6 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
@@ -23,18 +22,15 @@ import {
 const LOGIN_THROTTLE_LIMIT = 5;
 const LOGIN_THROTTLE_TTL_MS = 60_000;
 
-@ApiTags('auth')
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  @ApiOperation({ summary: 'Register a new passenger/driver account' })
   @Post('register')
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
   }
 
-  @ApiOperation({ summary: 'Log in with email and password' })
   @UseGuards(ThrottlerGuard)
   @Throttle({
     default: { limit: LOGIN_THROTTLE_LIMIT, ttl: LOGIN_THROTTLE_TTL_MS },
@@ -45,14 +41,12 @@ export class AuthController {
     return this.authService.login(dto);
   }
 
-  @ApiOperation({ summary: 'Exchange a refresh token for a new token pair' })
   @HttpCode(HttpStatus.OK)
   @Post('refresh')
   refresh(@Body() dto: RefreshTokenDto) {
     return this.authService.refresh(dto.refreshToken);
   }
 
-  @ApiOperation({ summary: 'Request a password reset token via email' })
   @HttpCode(HttpStatus.OK)
   @Post('forgot-password')
   async forgotPassword(@Body() dto: ForgotPasswordDto) {
@@ -62,7 +56,6 @@ export class AuthController {
     };
   }
 
-  @ApiOperation({ summary: 'Set a new password using a valid reset token' })
   @HttpCode(HttpStatus.OK)
   @Post('reset-password')
   async resetPassword(@Body() dto: ResetPasswordDto) {
@@ -73,7 +66,6 @@ export class AuthController {
     return { message: 'Password has been reset. Please log in again.', email };
   }
 
-  @ApiOperation({ summary: 'Log out and revoke the current refresh token' })
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   @Post('logout')

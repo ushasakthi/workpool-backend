@@ -1,4 +1,3 @@
-import { ApiProperty } from '@nestjs/swagger';
 import {
   IsNotEmpty,
   IsString,
@@ -13,14 +12,10 @@ import {
 } from '../../../common/utils/validation-patterns';
 
 export class ResetPasswordDto {
-  @ApiProperty({
-    description: 'Reset token received via the forgot-password flow',
-  })
   @IsString()
   @IsNotEmpty()
   token: string;
 
-  @ApiProperty({ example: 'NewStrongPass1' })
   @IsString()
   @MinLength(PASSWORD_MIN_LENGTH)
   @MaxLength(PASSWORD_MAX_LENGTH)

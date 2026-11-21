@@ -13,16 +13,11 @@ import { colomboDateString } from '../../src/modules/bookings/travel-date';
 // complete -> review -> Trust Score and savings. The steps share state and run
 // in order, like one user story.
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-// the first day from today that a Mon–Fri ride runs
-function nextWeekdayDate(): string {
-  for (let i = 0; ; i++) {
-    const date = colomboDateString(new Date(Date.now() + i * DAY_MS));
-    const day = new Date(date).getUTCDay();
-    if (day !== 0 && day !== 6) return date;
-  }
-}
+// The real pickup rules apply here (the dev-only skip switch is off under jest): the PIN
+// only works on the travel day, within an hour of departure. So the ride runs every day,
+// leaves a few minutes from now, and is booked for today.
+const DEPARTS_IN_MS = 10 * 60 * 1000;
+const EVERY_DAY = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 interface Body<T = Record<string, unknown>> {
   success: boolean;
@@ -130,8 +125,8 @@ describe('Booking flow (e2e)', () => {
         vehicleId,
         origin: { lat: 6.8649, lng: 79.8997, label: 'Nugegoda' },
         destination: { lat: 6.9271, lng: 79.8612, label: 'Colombo 03' },
-        departureTime: new Date(Date.now() + 2 * DAY_MS).toISOString(),
-        daysOfWeek: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
+        departureTime: new Date(Date.now() + DEPARTS_IN_MS).toISOString(),
+        daysOfWeek: EVERY_DAY,
         seatsAvailable: 3,
         costContribution: 400,
       })
@@ -147,7 +142,11 @@ describe('Booking flow (e2e)', () => {
     const response = await api()
       .post('/api/v1/bookings')
       .set(as(passenger))
-      .send({ rideId, seatsRequested: 1, travelDate: nextWeekdayDate() })
+      .send({
+        rideId,
+        seatsRequested: 1,
+        travelDate: colomboDateString(new Date()),
+      })
       .expect(201);
     const booking = (response.body as Body<{ id: string; status: string }>)
       .data;

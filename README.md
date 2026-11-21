@@ -77,8 +77,6 @@ the rest so an admin can reject them.
   `auth.service.ts` for a real mailer when one is added. The response is always the same generic
   message regardless of whether the email exists, to avoid leaking which addresses are registered.
 
-API docs (Swagger) are served at `/api/docs` when the app is running.
-
 ## Identity & workplace verification
 
 `PATCH /users/me/verification` (self, multipart) accepts a NIC document upload + `nicNumber` +

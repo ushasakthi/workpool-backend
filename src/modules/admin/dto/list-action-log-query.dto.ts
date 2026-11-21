@@ -1,9 +1,7 @@
-import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, Max, Min } from 'class-validator';
 
 export class ListActionLogQueryDto {
-  @ApiPropertyOptional({ example: 50, default: 50, maximum: 200 })
   @IsOptional()
   @Type(() => Number)
   @IsInt()

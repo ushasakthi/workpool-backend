@@ -1,4 +1,3 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   Equals,
   IsEmail,
@@ -19,17 +18,14 @@ import {
 } from '../../../common/utils/validation-patterns';
 
 export class RegisterDto {
-  @ApiProperty({ example: 'Nadeesha Perera' })
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)
   name!: string;
 
-  @ApiProperty({ example: 'nadeesha@example.com' })
   @IsEmail()
   email!: string;
 
-  @ApiProperty({ example: 'StrongPass1' })
   @IsString()
   @MinLength(PASSWORD_MIN_LENGTH)
   @MaxLength(PASSWORD_MAX_LENGTH)
@@ -39,22 +35,16 @@ export class RegisterDto {
   })
   password!: string;
 
-  @ApiProperty({ example: '+94771234567' })
   @Matches(PHONE_REGEX, {
     message: 'phone must be a valid phone number in international format',
   })
   phone!: string;
 
-  @ApiPropertyOptional({
-    enum: SELF_ASSIGNABLE_ROLES,
-    default: UserRole.PASSENGER,
-  })
   @IsOptional()
   @IsIn(SELF_ASSIGNABLE_ROLES)
   role?: UserRole;
 
   // must be exactly true: no account without agreeing it's cost-sharing, not hire
-  @ApiProperty({ example: true })
   @Equals(true, {
     message: 'You must accept the Terms & Conditions to create an account',
   })

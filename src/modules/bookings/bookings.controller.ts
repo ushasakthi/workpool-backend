@@ -8,7 +8,6 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { UserRole } from '../../common/constants';
 import {
@@ -30,13 +29,10 @@ import { BookingParticipantGuard } from './guards/booking-participant.guard';
 const PIN_THROTTLE_LIMIT = 5;
 const PIN_THROTTLE_TTL_MS = 60_000;
 
-@ApiTags('bookings')
-@ApiBearerAuth()
 @Controller('bookings')
 export class BookingsController {
   constructor(private readonly bookingsService: BookingsService) {}
 
-  @ApiOperation({ summary: 'Request seats on a ride (passenger/both roles)' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.PASSENGER, UserRole.BOTH)
   @Post()
@@ -47,9 +43,6 @@ export class BookingsController {
     return this.bookingsService.request(user.userId, dto);
   }
 
-  @ApiOperation({
-    summary: 'My bookings as a passenger, or requests on my rides as a driver',
-  })
   @UseGuards(JwtAuthGuard)
   @Get('me')
   findMine(
@@ -59,18 +52,12 @@ export class BookingsController {
     return this.bookingsService.listMine(user.userId, query.as, query.status);
   }
 
-  @ApiOperation({
-    summary: 'Days a ride can be booked for (next 7 days), with seats left',
-  })
   @UseGuards(JwtAuthGuard)
   @Get('days')
   listTravelDays(@Query() query: TravelDaysQueryDto) {
     return this.bookingsService.listTravelDays(query.rideId);
   }
 
-  @ApiOperation({
-    summary: 'Estimated cost savings for one month (passenger and driver side)',
-  })
   @UseGuards(JwtAuthGuard)
   @Get('me/savings')
   getSavings(
@@ -80,32 +67,24 @@ export class BookingsController {
     return this.bookingsService.getSavings(user.userId, query.month);
   }
 
-  @ApiOperation({
-    summary: 'Accept a request and take the seats (driver only)',
-  })
   @UseGuards(JwtAuthGuard, BookingDriverGuard)
   @Patch(':id/accept')
   accept(@Param('id') id: string) {
     return this.bookingsService.accept(id);
   }
 
-  @ApiOperation({ summary: 'Reject a request (driver only)' })
   @UseGuards(JwtAuthGuard, BookingDriverGuard)
   @Patch(':id/reject')
   reject(@Param('id') id: string) {
     return this.bookingsService.reject(id);
   }
 
-  @ApiOperation({ summary: 'Cancel a booking (passenger or driver)' })
   @UseGuards(JwtAuthGuard, BookingParticipantGuard)
   @Patch(':id/cancel')
   cancel(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.bookingsService.cancel(id, user.userId);
   }
 
-  @ApiOperation({
-    summary: "Check the passenger's pickup PIN (driver only, FR13)",
-  })
   // a 4-digit PIN could be guessed by trying them all, so only a few tries a minute
   @UseGuards(JwtAuthGuard, BookingDriverGuard, ThrottlerGuard)
   @Throttle({
@@ -116,10 +95,6 @@ export class BookingsController {
     return this.bookingsService.verifyPickup(id, dto.pin);
   }
 
-  @ApiOperation({
-    summary:
-      'Mark an accepted, pickup-verified booking completed (driver only)',
-  })
   @UseGuards(JwtAuthGuard, BookingDriverGuard)
   @Patch(':id/complete')
   complete(@Param('id') id: string) {

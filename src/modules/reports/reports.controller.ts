@@ -8,7 +8,6 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '../../common/constants';
 import {
   CurrentUser,
@@ -22,37 +21,28 @@ import { ListReportsQueryDto } from './dto/list-reports-query.dto';
 import { ResolveReportDto } from './dto/resolve-report.dto';
 import { ReportsService } from './reports.service';
 
-@ApiTags('reports')
-@ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('reports')
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
-  @ApiOperation({
-    summary: 'Report the other person on a booking (confidential)',
-  })
   @Post()
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateReportDto) {
     return this.reportsService.create(user.userId, dto);
   }
 }
 
-@ApiTags('admin')
-@ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.ADMIN)
 @Controller('admin/reports')
 export class AdminReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
-  @ApiOperation({ summary: 'List reports, optionally by status' })
   @Get()
   list(@Query() query: ListReportsQueryDto) {
     return this.reportsService.listForAdmin(query.status);
   }
 
-  @ApiOperation({ summary: 'Mark a report reviewed (upheld) or dismissed' })
   @Patch(':id')
   resolve(
     @Param('id') id: string,
