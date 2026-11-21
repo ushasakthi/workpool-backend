@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   UnauthorizedException,
@@ -12,7 +13,7 @@ import { MailService } from '../mail/mail.service';
 import { UsersService } from '../users/users.service';
 import { UserDocument } from '../users/schemas/user.schema';
 import { UserRole } from '../../common/constants';
-import { hashValue } from '../../common/utils/hash.util';
+import { compareValue, hashValue } from '../../common/utils/hash.util';
 
 describe('AuthService', () => {
   let authService: AuthService;
@@ -46,6 +47,7 @@ describe('AuthService', () => {
             setRefreshTokenHash: jest.fn().mockResolvedValue(undefined),
             setPushToken: jest.fn().mockResolvedValue(undefined),
             findByIdWithRefreshHash: jest.fn(),
+            findByIdWithPasswordHash: jest.fn(),
             setPasswordResetToken: jest.fn().mockResolvedValue(undefined),
             findByPasswordResetToken: jest.fn(),
             resetPassword: jest.fn().mockResolvedValue(undefined),
@@ -282,6 +284,36 @@ describe('AuthService', () => {
         expect.any(String),
       );
       expect(result).toEqual({ email: user.email });
+    });
+  });
+
+  describe('changePassword', () => {
+    it('rejects a wrong current password', async () => {
+      usersService.findByIdWithPasswordHash.mockResolvedValue(
+        await buildMockUser(),
+      );
+
+      await expect(
+        authService.changePassword('user-1', 'WrongPass1', 'NewStrongPass1'),
+      ).rejects.toThrow(BadRequestException);
+      expect(usersService.resetPassword).not.toHaveBeenCalled();
+    });
+
+    it('saves the new password hash and returns fresh tokens', async () => {
+      usersService.findByIdWithPasswordHash.mockResolvedValue(
+        await buildMockUser(),
+      );
+
+      const result = await authService.changePassword(
+        'user-1',
+        'CorrectPass1',
+        'NewStrongPass1',
+      );
+
+      const savedHash = usersService.resetPassword.mock.calls[0][1];
+      expect(await compareValue('NewStrongPass1', savedHash)).toBe(true);
+      expect(result.accessToken).toBe('signed.jwt.token');
+      expect(result.user.id).toBe('user-1');
     });
   });
 });

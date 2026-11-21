@@ -13,6 +13,7 @@ import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import {
   CurrentUser,
@@ -64,6 +65,24 @@ export class AuthController {
       dto.newPassword,
     );
     return { message: 'Password has been reset. Please log in again.', email };
+  }
+
+  // same limit as login, so a stolen token can't be used to guess the password
+  @UseGuards(JwtAuthGuard, ThrottlerGuard)
+  @Throttle({
+    default: { limit: LOGIN_THROTTLE_LIMIT, ttl: LOGIN_THROTTLE_TTL_MS },
+  })
+  @HttpCode(HttpStatus.OK)
+  @Post('change-password')
+  changePassword(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    return this.authService.changePassword(
+      user.userId,
+      dto.currentPassword,
+      dto.newPassword,
+    );
   }
 
   @UseGuards(JwtAuthGuard)

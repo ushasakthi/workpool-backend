@@ -106,6 +106,10 @@ export class UsersService {
       .exec();
   }
 
+  findByIdWithPasswordHash(id: string): Promise<UserDocument | null> {
+    return this.userModel.findById(id).select('+passwordHash').exec();
+  }
+
   findByIdWithRefreshHash(id: string): Promise<UserDocument | null> {
     return this.userModel.findById(id).select('+refreshTokenHash').exec();
   }

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -172,6 +173,31 @@ export class AuthService {
     await this.usersService.resetPassword(user.id, passwordHash);
 
     return { email: user.email };
+  }
+
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<AuthResult> {
+    const user = await this.usersService.findByIdWithPasswordHash(userId);
+    const passwordMatches = user
+      ? await compareValue(currentPassword, user.passwordHash)
+      : false;
+    if (!user || !passwordMatches) {
+      // 400, not 401: the app treats a 401 as an expired session
+      throw new BadRequestException('Current password is incorrect');
+    }
+
+    // resetPassword also clears the refresh token, which signs out other devices
+    await this.usersService.resetPassword(
+      user.id,
+      await hashValue(newPassword),
+    );
+
+    // fresh tokens keep this device signed in
+    const tokens = await this.issueTokens(user);
+    return { user: this.sanitize(user), ...tokens };
   }
 
   private async issueTokens(user: UserDocument): Promise<AuthTokens> {
